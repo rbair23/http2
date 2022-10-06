@@ -76,7 +76,16 @@ public final class HeadersFrame extends Frame {
         final var streamDependency = priorityFlag ? -1 : data & 0x7FFFFFFF;
         final var weight = priorityFlag ? 0 : in.readByte();
 
-        // TODO Parse off the field block fragment
+        // TODO Parse off the field block fragment. I think what we should do here is to just read the bytes
+        //      and store them in the frame, and let the Http2RequestHandler deal with parsing it and
+        //      decoding it. Not only is that better from a multi-threaded perspective, but actually a header's
+        //      fields can span a HeadersFrame and multiple ContinuationFrames, interleaved with all kinds of
+        //      other frames from other streams, and so only the request handler that gets the frames in
+        //      order for a single stream can make sense of the continuation blocks and handle flow control
+        //      and combining the bytes for decompression, and so forth. SO I think the game is to just keep
+        //      track of how many payload bytes for this frame we've parsed, and then use the frameLength
+        //      to know how many subsequent bytes we should read for the fieldBlockFragment. Also, we probably
+        //      need to use the padLength to get the very last bytes.
 
 
         return new HeadersFrame(flags, streamId, padLength, exclusive, streamDependency, weight);
