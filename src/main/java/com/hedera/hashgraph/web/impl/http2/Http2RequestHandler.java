@@ -41,7 +41,11 @@ public class Http2RequestHandler implements Runnable {
         this.shutdown = true;
     }
 
-    public static final class FrameHolder {
+    public void submit(Frame nextFrame) {
+        frames.offer(holder -> holder.frame = nextFrame);
+    }
+
+    private static final class FrameHolder {
         private Frame frame;
 
         public void reset(Frame frame) {
