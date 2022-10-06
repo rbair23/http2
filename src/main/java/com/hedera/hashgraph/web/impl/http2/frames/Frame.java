@@ -26,8 +26,13 @@ public abstract class Frame {
     private int streamId;
 
     protected Frame(FrameTypes type, int streamId) {
+        this(type, streamId, (byte) 0);
+    }
+
+    protected Frame(FrameTypes type, int streamId, byte flags) {
         this.type = type;
         this.streamId = streamId;
+        this.flags = flags;
         if (streamId < 0) {
             throw new IllegalArgumentException("FrameID must not use the 32nd bit");
         }

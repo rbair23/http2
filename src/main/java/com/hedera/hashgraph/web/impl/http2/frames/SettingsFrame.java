@@ -53,9 +53,8 @@ public final class SettingsFrame extends Frame {
             throw new Http2Exception(Http2ErrorCode.FRAME_SIZE_ERROR);
         }
 
-        // Read past the type
-        final var type = in.readByte();
-        assert type == FrameTypes.SETTINGS.ordinal() : "Wrong method called, type mismatch " + type + " not for settings";
+        // Skip over the type
+        in.skip(1);
 
         // SPEC: 6.5
         //   If the ACK flag is set, the length will be 0. If the ACK flag is set and the length is

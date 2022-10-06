@@ -35,7 +35,9 @@ public final class HeadersFrame extends Frame {
     private static final int END_HEADERS_FLAG = FLAG_5;
     private static final int END_STREAM_FLAG = FLAG_7;
 
-    public HeadersFrame(byte flags, int streamId, byte padLength, boolean exclusive, int streamDep, byte weight) {
+    private byte[] fieldBlockFragment;
+
+    public HeadersFrame(byte flags, int streamId, byte padLength, boolean exclusive, int streamDep, byte weight, byte[] fieldBlockFragment) {
         super(FrameTypes.HEADERS, streamId);
 
         if ((flags & PRIORITY_FLAG) != 0) {
@@ -70,11 +72,10 @@ public final class HeadersFrame extends Frame {
         final var streamId = in.read31BitInteger();
 
         final var padLength = paddedFlag ? in.readByte() : 0;
-
-        final var data = priorityFlag ? 0 : in.read32BitInteger();
-        final var exclusive = priorityFlag ? false : (data & (Integer.MIN_VALUE)) != 0;
-        final var streamDependency = priorityFlag ? -1 : data & 0x7FFFFFFF;
-        final var weight = priorityFlag ? 0 : in.readByte();
+        final var data = priorityFlag ? in.read32BitInteger(): 0;
+        final var exclusive = priorityFlag && (data & (Integer.MIN_VALUE)) != 0;
+        final var streamDependency = priorityFlag ? data & 0x7FFFFFFF : -1;
+        final var weight = priorityFlag ? in.readByte(): 0;
 
         // TODO Parse off the field block fragment. I think what we should do here is to just read the bytes
         //      and store them in the frame, and let the Http2RequestHandler deal with parsing it and
@@ -87,7 +88,12 @@ public final class HeadersFrame extends Frame {
         //      to know how many subsequent bytes we should read for the fieldBlockFragment. Also, we probably
         //      need to use the padLength to get the very last bytes.
 
+        final var extraBytesRead = (paddedFlag ? 1 : 0) + (priorityFlag ? 5 : 0);
+        final var blockDataLength = frameLength - (padLength + extraBytesRead);
+        final byte[] fieldBlockFragment = new byte[blockDataLength];
+        in.readBytes(fieldBlockFragment, blockDataLength);
+        in.skip(padLength);
 
-        return new HeadersFrame(flags, streamId, padLength, exclusive, streamDependency, weight);
+        return new HeadersFrame(flags, streamId, padLength, exclusive, streamDependency, weight, fieldBlockFragment);
     }
 }

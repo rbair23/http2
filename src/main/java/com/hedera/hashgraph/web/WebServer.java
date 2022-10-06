@@ -21,11 +21,14 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 /**
- * A simple implementation of an HTTP/2 server, based on the same API and semantics as the built-in Sun
- * {@link HttpServer}. HTTP/2 conforms to all the normal HTTP semantics, but rather than text-based request
- * and response, it supports multiplexing requests and responses over a single socket connection by sending
- * binary "frames" of data, where each "frame" has an identifier indicating which request or response it is
- * related to.
+ * A simple web server supporting both HTTP/1.1 and HTTP/2 requests. The API is based on the Oracle JDK's
+ * {@link HttpServer} class.
+ * <p>
+ * The implementation of HTTP/2 is based on <a href="https://httpwg.org/specs/rfc9113">RFC9113</a> and does not
+ * implement the deprecated priority signaling scheme defined in
+ * <a href="https://httpwg.org/specs/rfc9113.html#RFC7540">RFC7540</a>.
+ * <p>
+ * This implementation of HTTP/2 does not support PUSH_PROMISE or server side push in general at this time.
  */
 public final class WebServer extends HttpServer {
     /**

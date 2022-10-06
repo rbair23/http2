@@ -7,7 +7,7 @@ import com.hedera.hashgraph.web.impl.util.RingBuffer;
 import java.util.Objects;
 
 public class Http2RequestHandler implements Runnable {
-    private final RingBuffer<FrameHolder> frames = new RingBuffer<FrameHolder>(500, FrameHolder::new);
+    private final RingBuffer<FrameHolder> frames = new RingBuffer<>(512, FrameHolder::new);
     private final HttpOutputStream out;
     private boolean shutdown = false;
 

@@ -16,6 +16,11 @@ import java.util.Objects;
  * <p>
  * Buffer management is an implementation detail. As the client requests additional
  * bytes, if they need to be read from the underlying stream, they will be.
+ * <p>
+ * As per the spec, section 2.2:
+ * <blockquote>
+ *     All numeric values are in network byte order. Values are unsigned unless otherwise indicated
+ * </blockquote>
  */
 public final class HttpInputStream {
     /**
@@ -104,7 +109,7 @@ public final class HttpInputStream {
      * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
-    public byte readByte() throws IOException, EOFException {
+    public byte readByte() throws IOException {
         final var b = pollByte();
         this.readPosition++;
         return b;
@@ -118,7 +123,7 @@ public final class HttpInputStream {
      * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
-    public byte pollByte() throws IOException, EOFException {
+    public byte pollByte() throws IOException {
         return pollByte(0);
     }
 
@@ -130,9 +135,43 @@ public final class HttpInputStream {
      * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
-    public byte pollByte(int numBytesToLookPast) throws IOException, EOFException {
+    public byte pollByte(int numBytesToLookPast) throws IOException {
         loadIfNeededOrThrow(1 + numBytesToLookPast);
         return buffer[this.readPosition + numBytesToLookPast];
+    }
+
+    /**
+     * Reads {@code numBytes} bytes from the stream into the given array. The stream's read position is advanced
+     * irrevocably.
+     *
+     * @param array A non-null array which must be at least numBytes in length. Data will be placed into the
+     *              array starting at index 0.
+     * @param numBytes The number of bytes to read from the underlying stream
+     * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
+     * @throws EOFException If an attempt is made to read a byte past the end of the stream.
+     */
+    public void readBytes(byte[] array, int numBytes) throws IOException {
+        pollBytes(array, numBytes);
+        this.readPosition += numBytes;
+    }
+
+    /**
+     * Gets {@code numBytes} bytes from the stream and puts them into the given array <strong>without</strong> moving
+     * the read position. This method is idempotent.
+     *
+     * @param array A non-null array which must be at least numBytes in length. Data will be placed into the
+     *              array starting at index 0.
+     * @param numBytes The number of bytes to read from the underlying stream
+     * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
+     * @throws EOFException If an attempt is made to read a byte past the end of the stream.
+     */
+    public void pollBytes(byte[] array, int numBytes) throws IOException {
+        if (numBytes <= 0) {
+            return;
+        }
+
+        loadIfNeededOrThrow(numBytes);
+        System.arraycopy(buffer, this.readPosition, array, 0, numBytes);
     }
 
     /**
@@ -142,7 +181,7 @@ public final class HttpInputStream {
      * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
-    public int read16BitInteger() throws IOException, EOFException {
+    public int read16BitInteger() throws IOException {
         final var i = poll16BitInteger();
         this.readPosition += 2;
         return i;
@@ -156,7 +195,7 @@ public final class HttpInputStream {
      * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
-    public int poll16BitInteger() throws IOException, EOFException {
+    public int poll16BitInteger() throws IOException {
         loadIfNeededOrThrow(2);
         return buffer[readPosition] << 8 | buffer[readPosition + 1];
     }
@@ -168,7 +207,7 @@ public final class HttpInputStream {
      * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
-    public int read24BitInteger() throws IOException, EOFException {
+    public int read24BitInteger() throws IOException {
         final var i = poll24BitInteger();
         this.readPosition += 3;
         return i;
@@ -182,7 +221,7 @@ public final class HttpInputStream {
      * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
-    public int poll24BitInteger() throws IOException, EOFException {
+    public int poll24BitInteger() throws IOException {
         loadIfNeededOrThrow(3);
         return buffer[readPosition] << 16 | buffer[readPosition + 1] << 8 | buffer[readPosition + 2];
     }
@@ -195,7 +234,7 @@ public final class HttpInputStream {
      * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
-    public int read31BitInteger() throws IOException, EOFException {
+    public int read31BitInteger() throws IOException {
         final var i = poll31BitInteger();
         this.readPosition += 4;
         return i;
@@ -209,7 +248,7 @@ public final class HttpInputStream {
      * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
-    public int poll31BitInteger() throws IOException, EOFException {
+    public int poll31BitInteger() throws IOException {
         int result = poll32BitInteger();
         result &= 0x7FFFFFFF; // Strip off the high bit, setting it to 0
         return result;
@@ -223,7 +262,7 @@ public final class HttpInputStream {
      * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
-    public int read32BitInteger() throws IOException, EOFException {
+    public int read32BitInteger() throws IOException {
         final var i = poll32BitInteger();
         this.readPosition += 4;
         return i;
@@ -237,13 +276,56 @@ public final class HttpInputStream {
      * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
-    public int poll32BitInteger() throws IOException, EOFException {
+    public int poll32BitInteger() throws IOException {
         loadIfNeededOrThrow(4);
         int result = buffer[readPosition] << 24;
         result |= buffer[readPosition + 1] << 16;
         result |= buffer[readPosition + 2] << 8;
         result |= buffer[readPosition + 3];
         return result;
+    }
+
+    /**
+     * Reads an unsigned 64-bit long from the stream by reading 64 bits.
+     * The stream's read position is advanced irrevocably.
+     *
+     * @return A 64-bit long
+     * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
+     * @throws EOFException If an attempt is made to read a byte past the end of the stream.
+     */
+    public long read64BitLong() throws IOException {
+        final var i = poll64BitLong();
+        this.readPosition += 8;
+        return i;
+    }
+
+    /**
+     * Gets a 64-bit long from the stream <strong>without</strong> moving the read position by reading
+     * 64 bits. This method is idempotent.
+     *
+     * @return A 64-bit long
+     * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
+     * @throws EOFException If an attempt is made to read a byte past the end of the stream.
+     */
+    public long poll64BitLong() throws IOException {
+        loadIfNeededOrThrow(8);
+        long result = asLongNoSignExtend(buffer[readPosition]) << 56;
+        result |= asLongNoSignExtend(buffer[readPosition + 1]) << 48;
+        result |= asLongNoSignExtend(buffer[readPosition + 2]) << 40;
+        result |= asLongNoSignExtend(buffer[readPosition + 3]) << 32;
+        result |= buffer[readPosition + 4] << 24;
+        result |= buffer[readPosition + 5] << 16;
+        result |= buffer[readPosition + 6] << 8;
+        result |= buffer[readPosition + 7];
+        return result;
+    }
+
+    private long asLongNoSignExtend(byte b) {
+        if (b < 0) {
+            return  0x8L | (b & 0x7F);
+        } else {
+            return b;
+        }
     }
 
     /**
@@ -259,7 +341,7 @@ public final class HttpInputStream {
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      * @throws IllegalArgumentException If the given byte array is too large
      */
-    public boolean prefixMatch(final byte[] bytes) throws IOException, EOFException {
+    public boolean prefixMatch(final byte[] bytes) throws IOException {
         if (buffer.length < bytes.length) {
             throw new IllegalArgumentException("The supplied byte array was larger than the buffer of this stream");
         }
@@ -276,7 +358,7 @@ public final class HttpInputStream {
      * @throws IOException
      * @throws EOFException
      */
-    private void loadIfNeededOrThrow(int numBytes) throws IOException, EOFException {
+    private void loadIfNeededOrThrow(int numBytes) throws IOException {
         assert numBytes <= buffer.length;
 
         // Check to see if we have enough available bytes in the buffer already
