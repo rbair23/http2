@@ -84,35 +84,12 @@ public class Http2ProtocolHandler implements ProtocolHandler {
         final var streamId = windowFrame.getStreamId();
         if (streamId != 0) {
             submitFrame(windowFrame, streamId, out);
+        } else {
+            // TODO need to do something with the default flow control settings for the connection...
         }
     }
 
     private void handleHeaders(HttpInputStream in, HttpOutputStream out) throws IOException {
-        final var frameLength = in.read24BitInteger();
-
-        // Read past the type
-        in.readByte();
-
-        // TODO, keep track of the number of bytes read, and make sure they match frameLength perfectly
-
-        var flags = in.readByte();
-        final var priorityFlag = (flags & 0b0010_0000) != 0;
-        final var paddedFlag = (flags & 0b0000_1000) != 0;
-        final var endHeadersFlag = (flags & 0b0000_0100) != 0;
-        final var endStreamFlag = (flags & 0b0000_0001) != 0;
-
-        final var streamId = in.read31BitInteger();
-
-        final var padLength = paddedFlag ? in.readByte() : 0;
-
-        if (priorityFlag) {
-            final var data = in.read32BitInteger();
-            final var exclusive = (data & (Integer.MIN_VALUE)) != 0;
-            final var streamDependency = data & 0x7FFFFFFF;
-            final var weight = in.readByte();
-        }
-
-        // TODO Parse off the field block fragment
 
     }
 

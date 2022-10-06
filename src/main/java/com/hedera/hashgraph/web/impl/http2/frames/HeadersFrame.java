@@ -1,5 +1,8 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
+import com.hedera.hashgraph.web.impl.HttpInputStream;
+
+import java.io.IOException;
 import java.nio.ByteBuffer;
 
 /*
@@ -32,15 +35,50 @@ public final class HeadersFrame extends Frame {
     private static final int END_HEADERS_FLAG = FLAG_5;
     private static final int END_STREAM_FLAG = FLAG_7;
 
-    public HeadersFrame(int streamId) {
+    public HeadersFrame(byte flags, int streamId, byte padLength, boolean exclusive, int streamDep, byte weight) {
         super(FrameTypes.HEADERS, streamId);
-        setFlag(END_HEADERS_FLAG);
-        setFlag(END_STREAM_FLAG);
+
+        if ((flags & PRIORITY_FLAG) != 0) {
+            setFlag(PRIORITY_FLAG);
+        }
+
+        if ((flags & PADDED_FLAG) != 0) {
+            setFlag(PADDED_FLAG);
+        }
+
+        if ((flags & END_HEADERS_FLAG) != 0) {
+            setFlag(END_HEADERS_FLAG);
+        }
+
+        if ((flags & END_STREAM_FLAG) != 0) {
+            setFlag(END_STREAM_FLAG);
+        }
     }
 
-    public void serialize(ByteBuffer buffer) {
-        // length (24)
-        // type (8)
-        //
+    public static HeadersFrame parse(HttpInputStream in) throws IOException {
+        final var frameLength = in.read24BitInteger();
+
+        // Read past the type
+        in.readByte();
+
+        // TODO, keep track of the number of bytes read, and make sure they match frameLength perfectly
+
+        var flags = in.readByte();
+        final var priorityFlag = (flags & PRIORITY_FLAG) != 0;
+        final var paddedFlag = (flags & PADDED_FLAG) != 0;
+
+        final var streamId = in.read31BitInteger();
+
+        final var padLength = paddedFlag ? in.readByte() : 0;
+
+        final var data = priorityFlag ? 0 : in.read32BitInteger();
+        final var exclusive = priorityFlag ? false : (data & (Integer.MIN_VALUE)) != 0;
+        final var streamDependency = priorityFlag ? -1 : data & 0x7FFFFFFF;
+        final var weight = priorityFlag ? 0 : in.readByte();
+
+        // TODO Parse off the field block fragment
+
+
+        return new HeadersFrame(flags, streamId, padLength, exclusive, streamDependency, weight);
     }
 }
