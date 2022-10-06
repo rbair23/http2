@@ -43,4 +43,9 @@ public abstract class Frame {
 
     // reserved (1)
     // payload....
+
+
+    public final int getStreamId() {
+        return streamId;
+    }
 }

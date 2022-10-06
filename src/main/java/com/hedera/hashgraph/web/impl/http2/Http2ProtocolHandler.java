@@ -3,14 +3,14 @@ package com.hedera.hashgraph.web.impl.http2;
 import com.hedera.hashgraph.web.impl.ProtocolHandler;
 import com.hedera.hashgraph.web.impl.HttpInputStream;
 import com.hedera.hashgraph.web.impl.HttpOutputStream;
-import com.hedera.hashgraph.web.impl.http2.frames.FrameTypes;
-import com.hedera.hashgraph.web.impl.http2.frames.Settings;
-import com.hedera.hashgraph.web.impl.http2.frames.SettingsFrame;
+import com.hedera.hashgraph.web.impl.http2.frames.*;
 
 import java.io.EOFException;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 // Right now, this is created per-thread. To be reused across threads, we have to do some kind of per-thread state,
 // such as for settings and request handlers.
@@ -22,7 +22,8 @@ public class Http2ProtocolHandler implements ProtocolHandler {
     private final Settings settings = new Settings();
 
     // Map of request id to request handler. Each frame that we read maps to a specific handler, key'd by id.
-//    private final Map<Integer, Http2RequestHandler> requestHandlers = new HashMap();
+    private final Map<Integer, Http2RequestHandler> requestHandlers = new HashMap();
+    private final Executor threadPool = Executors.newCachedThreadPool();
 
     @Override
     public void handle(HttpInputStream in, HttpOutputStream out) {
@@ -61,6 +62,7 @@ public class Http2ProtocolHandler implements ProtocolHandler {
         final var type = FrameTypes.fromOrdinal(in.pollByte(3));
         switch (type) {
             case SETTINGS -> handleSettings(in, out);
+            case WINDOW_UPDATE -> handleWindowUpdate(in, out);
 //            case HEADERS -> handleHeaders(in, out);
             // I don't know how to handle this one, so just skip it.
             default -> skipUnknownFrame(in);
@@ -75,6 +77,14 @@ public class Http2ProtocolHandler implements ProtocolHandler {
     private void handleSettings(HttpInputStream in, HttpOutputStream out) throws IOException {
         SettingsFrame.parseAndMerge(in, settings);
         SettingsFrame.writeAck(out);
+    }
+
+    private void handleWindowUpdate(HttpInputStream in, HttpOutputStream out) throws IOException {
+        final var windowFrame = WindowUpdateFrame.parse(in);
+        final var streamId = windowFrame.getStreamId();
+        if (streamId != 0) {
+            submitFrame(windowFrame, streamId, out);
+        }
     }
 
     private void handleHeaders(HttpInputStream in, HttpOutputStream out) throws IOException {
@@ -104,5 +114,15 @@ public class Http2ProtocolHandler implements ProtocolHandler {
 
         // TODO Parse off the field block fragment
 
+    }
+
+    private void submitFrame(Frame frame, int streamId, HttpOutputStream out) {
+        final var handler = requestHandlers.computeIfAbsent(streamId, k -> {
+            final var h = new Http2RequestHandler(out);
+            threadPool.execute(h);
+            return h;
+        });
+
+        handler.submit(frame);
     }
 }
