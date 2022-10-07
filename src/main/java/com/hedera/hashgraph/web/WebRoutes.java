@@ -63,4 +63,10 @@ public final class WebRoutes {
         Objects.requireNonNull(routeToRemove);
         routes.remove(routeToRemove.method() + "-" + routeToRemove.path());
     }
+
+    public WebRequestHandler match(String method, String path) {
+        final var m = method.toUpperCase();
+        final var key = m + "-" + path;
+        return routes.get(key);
+    }
 }

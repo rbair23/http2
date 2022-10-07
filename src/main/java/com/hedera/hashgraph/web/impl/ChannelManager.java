@@ -7,111 +7,144 @@ import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.time.Duration;
 import java.util.Objects;
-import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 
 /**
- * Responsible for managing all channels, or network connections with the clients.
- * Handles incoming "accept" TCP connections, and holds onto the socket until it has data ready to be read.
- * At that point, it converts the socket to a blocking read operation, and passes it into a buffer for connections...
+ * Manages the set of all open connections on a single {@link ServerSocketChannel}.
  */
-public class ChannelManager {
+public final class ChannelManager {
+    /**
+     * This is the channel we will be listening for connections on
+     */
     private final ServerSocketChannel ssc;
-    private final Selector selector;
-    private final SelectionKey listenerKey;
-    private final Duration timeout;
 
-    public ChannelManager(
-            final ServerSocketChannel ssc,
-            final SelectionKey listenerKey,
-            final Selector selector,
-            final Duration selectorTimeout) {
+    /**
+     * NIO Selector for listening to "accept" and "read" events of connections on the {@link #ssc}.
+     */
+    private final Selector selector;
+
+    /**
+     * This key is used to look up "accept" events from the {@link #ssc}, and to close down the
+     * socket when we're done.
+     */
+    private final SelectionKey acceptKey;
+
+    /**
+     * Indicates whether the TCP socket option TCP_NODELAY should be set on new connections.
+     */
+    private final boolean noDelay;
+
+    /**
+     * Flag set by the {@link #shutdown()} method, generally by a different thread, to interrupt any
+     * processing this class may be doing, and to interrupt the {@link #selector}.
+     */
+    private volatile boolean shutdown = false;
+
+    /**
+     * Creates a new instance.
+     *
+     * @param ssc The {@link ServerSocketChannel} to listen to. This channel must be bound already,
+     *            and must not be null.
+     * @param noDelay Indicates whether the TCP socket option TCP_NODELAY should be set on new connections.
+     * @throws IOException If we are unable to open a selector or register it with the channel.
+     */
+    public ChannelManager(final ServerSocketChannel ssc, final boolean noDelay) throws IOException {
         this.ssc = Objects.requireNonNull(ssc);
-        this.listenerKey = Objects.requireNonNull(listenerKey);
-        this.selector = Objects.requireNonNull(selector);
-        this.timeout = Objects.requireNonNull(selectorTimeout);
+
+        // Create the listener key for listening to new connection "accept" events
+        this.selector = Selector.open();
+        this.acceptKey = ssc.register(selector, SelectionKey.OP_ACCEPT);
+        this.noDelay = noDelay;
     }
 
-    public void run() {
-//        while (!quit) {
-            try {
-                selector.select(timeout.toMillis());
-            } catch (IOException e) {
-                System.err.println("Something went wrong while trying to prime the selector");
-                e.printStackTrace();
-            }
+    /**
+     * Threadsafe method to terminate any processing being done by this class and interrupt
+     * the {@link #checkConnections(Duration, Consumer)} method, if it is blocking.
+     */
+    public void shutdown() {
+        this.shutdown = true;
 
-            // Ask the selector for all the selection keys. They may contain a combination of the
-            // "listener" key (which corresponds to "accept" events), or other keys corresponding
-            // to socket channels previously opened, but waiting for their first connection.
-            final var keys = selector.selectedKeys();
-            final var itr = keys.iterator();
-            while (itr.hasNext()) {
-                final var key = itr.next();
-                itr.remove();
-
-                // If the key in the set is the "listener" key, then we have a new socket to accept.
-                // To accept a socket, we will need to get the socket channel and create a new
-                // Http2Connection with all the gory details. We'll hold onto that object until
-                // data is ready to be read. At that point, we'll go ahead and submit the connection
-                // to the executor for handling.
-                if (key == listenerKey) {
-                    accept();
-                } else if (key.isReadable()) {
-                    process(key);
-                }
-            }
-
-            // call the selector just to process the canceled keys (see ServerImpl.java)
-            try {
-                selector.selectNow();
-            } catch (IOException e) {
-                System.err.println("Failed to select. No idea.");
-                e.printStackTrace();
-            }
-//        }
-
+        // Call the selector just to process the canceled keys (see ServerImpl.java)
         try {
+            selector.wakeup();
+            selector.selectNow();
             selector.close();
         } catch (IOException e) {
-            System.err.println("Couldn't close selector. Probably non-fatal...");
+            System.err.println("Failed to cleanly close. Probably not fatal, but probably bad?");
             e.printStackTrace();
         }
     }
 
-    private void accept() {
-        // Go ahead and accept the socket channel and configure it
+    /**
+     * Iterates over all connections which are either new ("accept") or have data available for reading. For each
+     * connection that is new, begins listening to that connection for "read". For each connection with data ready
+     * for reading, the {@code onRead} lambda will be called.
+     * <p>
+     * If there are no connections, or all connections are idle, then the method will block until the {@code timeout}
+     * has expired. This blocking operation may be interrupted with {@link Thread#interrupt()}. Calling the
+     * {@link #shutdown()} method will also interrupt this blocking operation, but should only be used when you are
+     * done with this instance.
+     *
+     * @param timeout Specifies the duration of time to block while waiting for events on idle connections.
+     * @param onRead A callback invoked for each {@link SelectionKey} that has data ready to be read
+     */
+    public void checkConnections(final Duration timeout, final Consumer<SelectionKey> onRead) {
         try {
+            // Check for available keys. This call blocks until either some keys are available,
+            // or until the timeout is reached.
+            int numKeysAvailable = selector.select(timeout.toMillis());
+
+            // We found no keys, so we can just return.
+            if (numKeysAvailable == 0) {
+                return;
+            }
+
+            // TODO I'm worried about this. Having the accept selector and the read selector be the same
+            //      and processed by the same thread may mean I can accept at most one new connection
+            //      per iteration of the connections. That could slow the rate of new connections to some
+            //      unacceptable level. I may need two threads, one for handling new connections and
+            //      one for processing existing connections with data.
+            // Get the keys. They may be of two kinds. The set may contain the "acceptKey" indicating
+            // that there is a new connection. Or it may contain one or more other keys that correspond
+            // to a particular connection that has data to be read. For each of these, simply call the
+            // onRead lambda with the key.
+            final var keys = selector.selectedKeys();
+            final var itr = keys.iterator();
+            while (itr.hasNext() && !shutdown) {
+                final var key = itr.next();
+                itr.remove();
+
+                // If the key in the set is the "acceptKey", then we have a new connection to accept.
+                // To accept a connection, we will need to get the socket channel
+                if (key == acceptKey) {
+                    accept();
+                } else if (key.isReadable()) {
+                    onRead.accept(key);
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to select. This is probably an unrecoverable server error!!!");
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Accepts a new socket connection, registering to listen to read events on it.
+     */
+    private void accept() {
+        try {
+            // Go ahead and accept the socket channel and configure it
             final var socketChannel = ssc.accept();
             if (socketChannel != null) {
-//                // TODO Set TCP_NODELAY, if appropriate
-//                if (ServerConfig.noDelay()) {
-//                    chan.socket().setTcpNoDelay(true);
-//                }
+                socketChannel.socket().setTcpNoDelay(noDelay);
                 socketChannel.configureBlocking(false);
-
-                // SocketChannel keeps a reference to newKey, so I don't have to.
-                final var newKey = socketChannel.register(selector, SelectionKey.OP_READ);
-                final var conn = new ConnectionHandler(socketChannel);
-                newKey.attach(conn);
+                socketChannel.register(selector, SelectionKey.OP_READ);
             }
         } catch (ClosedChannelException e) {
             System.err.println("Channel Closed Prematurely. Might be OK. Not Sure if we should even log it.");
             e.printStackTrace();
         } catch (IOException e) {
             System.err.println("Something else went wrong. Might also be OK. Not sure.");
-            e.printStackTrace();
-        }
-    }
-
-    private void process(SelectionKey key) {
-        try {
-            final var conn = (ConnectionHandler) key.attachment();
-            final var channel = key.channel();
-            key.cancel(); // We no longer need events from this thing. We can just use the channel.
-            channel.configureBlocking(true); // Switch to blocking mode for this data stream
-//            connectionPool.execute(conn);
-        } catch (IOException e) {
-            System.err.println("Not sure if I care about this either, something bogus somewhere.");
             e.printStackTrace();
         }
     }

@@ -6,8 +6,6 @@ import com.hedera.hashgraph.web.impl.Dispatcher;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.time.Duration;
 import java.util.Objects;
@@ -63,18 +61,6 @@ public final class WebServer {
      *  A factory for creating new connections with clients. Created when the server is started.
      */
     private ServerSocket serverSocket;
-
-    /**
-     * NIO Selector associated with the {@link #listenerKey} and {@link #serverSocket}. Created
-     * when the server is started.
-     */
-    private Selector selector;
-
-    /**
-     * This key is used to look up "accept" events from the {@link #serverSocket}, and to close down the
-     * socket when we're done. Created when the server is started.
-     */
-    private SelectionKey listenerKey;
 
     /**
      * The dispatcher is responsible for processing all connections and their data and
@@ -140,13 +126,9 @@ public final class WebServer {
         this.serverSocket = ssc.socket();
         serverSocket.bind(config.addr(), config.backlog());
 
-        // Create the listener key for listening to new connection "accept" events
-        this.selector = Selector.open();
-        this.listenerKey = ssc.register(selector, SelectionKey.OP_ACCEPT);
-
         // Create and start the dang thread
-        final var channelManager = new ChannelManager(ssc, listenerKey, selector, Duration.ofSeconds(1));
-        this.dispatcher = new Dispatcher(channelManager, routes, config.executor());
+        final var channelManager = new ChannelManager(ssc, config.noDelay());
+        this.dispatcher = new Dispatcher(config, routes, config.executor(), channelManager);
         this.dispatchThread = new Thread(dispatcher, "WEB-Dispatcher");
         lifecycle = Lifecycle.STARTED;
         this.dispatchThread.start();
@@ -169,7 +151,7 @@ public final class WebServer {
         } catch (IOException ignored) {
         }
 
-        this.selector.wakeup();
+//        this.selector.wakeup();
 
         this.dispatcher.shutdown();
 //        // TODO Replace the use of System.currentTimeMillis with something like from platform that
@@ -185,7 +167,7 @@ public final class WebServer {
 //            }
 //        }
         lifecycle = Lifecycle.FINISHED;
-        selector.wakeup();
+//        selector.wakeup();
 
 //        synchronized (allConnections) {
 //            for (HttpConnection c : allConnections) {

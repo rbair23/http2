@@ -81,7 +81,7 @@ public class AcceptHandler implements Runnable {
     }
 
     public void shutdown() {
-        // Causes the run() loop to terminate, possibly "timeout" milliseconds later.
+        // Causes the checkConnections() loop to terminate, possibly "timeout" milliseconds later.
         quit = true;
     }
 
