@@ -53,4 +53,8 @@ public abstract class Frame {
     public final int getStreamId() {
         return streamId;
     }
+
+    public FrameTypes getType() {
+        return type;
+    }
 }

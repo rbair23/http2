@@ -1,0 +1,96 @@
+package com.hedera.hashgraph.web;
+
+import java.net.InetSocketAddress;
+import java.util.Objects;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+
+/**
+ * Configuration for the {@link WebServer}.
+ *
+ * @param addr The internet address the server is bound to. Cannot be null.
+ * @param executor The executor used for handling a connection. This executor may be specified by the user.
+ *                 By default, it is single-threaded, meaning that only a single connection can be handled at a time.
+ * @param backlog The number of connections to hold in a backlog until they are ready to be handled.
+ */
+public record WebServerConfig(InetSocketAddress addr, Executor executor, int backlog) {
+    /**
+     * Defines the default value for the backlog.
+     * <p>
+     * Multiple clients may attempt to connect to the server at roughly the same time. In
+     * NIO, a single thread waits for a socket "accept" event, does a very small amount of
+     * work, and then becomes available for the next "accept" event. If clients connect faster
+     * than the server can accept them, then a backlog builds up. If the backlog exceeds some
+     * configured value, then additional connections are refused.
+     * <p>
+     * At some point, the number of open connections will exceed a threshold, and it will become
+     * necessary to slow down or stop accepting connections. If that happens, the backlog will also
+     * be filled, until there is no backlog space available, and new connection attempts are refused.
+     * <p>
+     * It turns out, if the value is <= 0, then a default backlog value is chosen by Java.
+     */
+    private static final int DEFAULT_BACKLOG = 0;
+
+    public WebServerConfig {
+        Objects.requireNonNull(addr);
+        Objects.requireNonNull(executor);
+        Objects.requireNonNull(backlog);
+    }
+
+    public WebServerConfig() {
+        this(new InetSocketAddress("localhost", 0), Executors.newSingleThreadExecutor(), 0);
+    }
+
+    public static final class Builder {
+        private String host;
+        private int port;
+        private InetSocketAddress addr;
+        private int backlog;
+        private Executor executor;
+
+        public Builder host(String host) {
+            this.host = Objects.requireNonNull(host);
+            return this;
+        }
+
+        public Builder port(int port) {
+            this.port = port;
+            return this;
+        }
+
+        public Builder ephemeralPort() {
+            this.port = WebServer.EPHEMERAL_PORT;
+            return this;
+        }
+
+        public Builder address(InetSocketAddress address) {
+            this.addr = address;
+            return this;
+        }
+
+        public Builder backlog(int backlog) {
+            this.backlog = backlog;
+            return this;
+        }
+
+        public Builder executor(Executor e) {
+            this.executor = e;
+            return this;
+        }
+
+        public Builder reset() {
+            this.host = "localhost";
+            this.port = WebServer.EPHEMERAL_PORT;
+            this.addr = null;
+            this.backlog = DEFAULT_BACKLOG;
+            this.executor = null;
+            return this;
+        }
+
+        public WebServerConfig build() {
+            final var a = addr == null ? new InetSocketAddress(host, port) : addr;
+            final var e = executor == null ? Executors.newSingleThreadExecutor() : executor;
+            return new WebServerConfig(a, e, backlog);
+        }
+    }
+}

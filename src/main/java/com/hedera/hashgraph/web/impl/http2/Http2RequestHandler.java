@@ -2,6 +2,8 @@ package com.hedera.hashgraph.web.impl.http2;
 
 import com.hedera.hashgraph.web.impl.HttpOutputStream;
 import com.hedera.hashgraph.web.impl.http2.frames.Frame;
+import com.hedera.hashgraph.web.impl.http2.frames.FrameTypes;
+import com.hedera.hashgraph.web.impl.http2.frames.HeadersFrame;
 import com.hedera.hashgraph.web.impl.util.RingBuffer;
 
 import java.util.Objects;
@@ -32,7 +34,11 @@ public class Http2RequestHandler implements Runnable {
 
             // Alright, we got the next frame, so we can now process it
             final var nextFrame = nextHolder.frame;
+            if (nextFrame.getType() == FrameTypes.HEADERS) {
+                final var headerFrame = (HeadersFrame) nextFrame;
 
+
+            }
             // TODO Something with this frame...
         }
     }

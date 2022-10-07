@@ -1,28 +1,19 @@
 package com.hedera.hashgraph.web;
 
 import com.hedera.hashgraph.web.impl.AcceptHandler;
-import com.hedera.hashgraph.web.impl.http.HttpContextImpl;
-import com.sun.net.httpserver.HttpContext;
-import com.sun.net.httpserver.HttpHandler;
-import com.sun.net.httpserver.HttpServer;
+import com.hedera.hashgraph.web.impl.Dispatcher;
 
 import java.io.IOException;
-import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.time.Duration;
-import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 
 /**
- * A simple web server supporting both HTTP/1.1 and HTTP/2 requests. The API is based on the Oracle JDK's
- * {@link HttpServer} class.
+ * A simple web server supporting both HTTP/1.1 and HTTP/2 requests.
  * <p>
  * The implementation of HTTP/2 is based on <a href="https://httpwg.org/specs/rfc9113">RFC9113</a> and does not
  * implement the deprecated priority signaling scheme defined in
@@ -30,197 +21,147 @@ import java.util.concurrent.Executors;
  * <p>
  * This implementation of HTTP/2 does not support PUSH_PROMISE or server side push in general at this time.
  */
-public final class WebServer extends HttpServer {
-    /**
-     * Defines the default value for the backlog.
-     * <p>
-     * Multiple clients may attempt to connect to the server at roughly the same time. In
-     * NIO, a single thread waits for a socket "accept" event, does a very small amount of
-     * work, and then becomes available for the next "accept" event. If clients connect faster
-     * than the server can accept them, then a backlog builds up. If the backlog exceeds some
-     * configured value, then additional connections are refused.
-     * <p>
-     * At some point, the number of open connections will exceed a threshold, and it will become
-     * necessary to slow down or stop accepting connections. If that happens, the backlog will also
-     * be filled, until there is no backlog space available, and new connection attempts are refused.
-     * <p>
-     * It turns out, if the value is <= 0, then a default backlog value is chosen by Java.
-     */
-    private static final int DEFAULT_BACKLOG = 0;
+public final class WebServer {
+    private enum Lifecycle {
+        NOT_STARTED,
+        STARTED,
+        FINISHING,
+        FINISHED
+    }
 
     /**
-     * A concurrent map of path-to-handler. The {@link HttpContextImpl} is just the information around
-     * a handler (specifically, the handler and its path and interceptors or "filters"). So every path can
-     * have at most one handler. This class is threadsafe, so the context map must be threadsafe as well.
+     * The port number to use if you want the server to choose an ephemeral port at random. Great for testing.
      */
-    private final Map<String, HttpContextImpl> contextMap = new ConcurrentHashMap<>();
+    public static final int EPHEMERAL_PORT = 0;
 
     /**
-     * The internet address the server is bound to. This can be specified in the constructor, or it
-     * can be specified via the {@link #bind(InetSocketAddress, int)} method.
+     * Configuration settings for the web server. Once set, the configuration cannot be changed.
      */
-    private InetSocketAddress addr;
+    private final WebServerConfig config;
 
     /**
-     * The executor used for handling a connection. This executor may be specified by the user. By default,
-     * it is single-threaded, meaning that only a single request can be handled at a time (!!).
+     * The routes configured on this server. The routes may be modified at any time.
      */
-    private Executor executor = null;
+    private final WebRoutes routes;
 
     /**
-     * A factory for a {@link ServerSocket} used for handling client connections.
+     * Lifecycle state. The server progresses from {@link Lifecycle#NOT_STARTED} through all states
+     * until reaching {@link Lifecycle#FINISHED}. It moves linearly through states and never goes
+     * back to any previous state. Once used, a web server cannot be reused.
      */
-    private final ServerSocketChannel ssc;
+    private volatile Lifecycle lifecycle;
+
+    //-------------- All fields below are related to a running server only
 
     /**
-     *  A factory for creating new connections with clients. Only a single instance of this is used, but
-     *  it may be created through either the constructor or through the {@link #bind(InetSocketAddress, int)}
-     *  method. Once created, it is never changed or destroyed.
+     * A factory for a {@link ServerSocket} used for handling client connections. The instance is
+     * created when the server is started.
+     */
+    private ServerSocketChannel ssc;
+
+    /**
+     *  A factory for creating new connections with clients. Created when the server is started.
      */
     private ServerSocket serverSocket;
 
     /**
-     * NIO Selector associated with the {@link #listenerKey} and {@link #serverSocket}.
+     * NIO Selector associated with the {@link #listenerKey} and {@link #serverSocket}. Created
+     * when the server is started.
      */
-    private Selector selector = Selector.open();
+    private Selector selector;
 
     /**
      * This key is used to look up "accept" events from the {@link #serverSocket}, and to close down the
-     * socket when we're done.
+     * socket when we're done. Created when the server is started.
      */
     private SelectionKey listenerKey;
 
     /**
-     * Lifecycle state to keep track of whether we have bound to a particular hostname and port. This
-     * can only happen once. It can happen in the constructor or in the {@link #bind(InetSocketAddress, int)}.
+     * The dispatcher is responsible for processing all connections and their data and
+     * eventually dispatching web requests to the appropriate {@link WebRequestHandler}.
+     * The instance is created during server {@link #start()} and cleared when the server
+     * is stopped.
      */
-    private boolean bound = false;
+    private Dispatcher dispatcher;
 
     /**
-     * Lifecycle state to keep track of whether the server has started listening.
-     */
-    private boolean started = false;
-
-    /**
-     * Lifecycle state to indicate that we are terminating, but not yet stopped.
-     */
-    private boolean terminating = false;
-
-    /**
-     * Lifecycle state to keep track of whether the server has finished.
-     */
-    private volatile boolean finished = false;
-
-    /**
-     * Listens to all NIO events, and handles them.
-     */
-    private AcceptHandler dispatcher;
-
-    /**
-     * This thread responds to all NIO events, such as when new connections become available for
-     * "accept", and when a connection becomes available for read.
+     * This thread is used for running the dispatcher. It is created on {@link #start()}
+     * and cleared when the server stops.
      */
     private Thread dispatchThread;
 
     /**
-     * Create a new Http2Server unbound to any port.
-     *
-     * @throws IOException Cannot actually be thrown.
+     * Create a new web server with default configuration. By default, the server will use
+     * port 8080 on the local host. To use an ephemeral port, create the server with a web
+     * server configuration with a port number of 0.
      */
-    public WebServer() throws IOException {
-        this(null, DEFAULT_BACKLOG);
+    public WebServer() {
+        this("localhost", 8080);
     }
 
     /**
-     * Creates a new Http2Server on the given address.
+     * Create a new web server with given host and port. To use an ephemeral port, use the value of 0.
      *
-     * @param addr The address to bind to. Cannot be null.
-     * @throws IOException If the socket cannot be bound.
+     * @param host The host to bind to. Must not be null.
+     * @param port The port to bind to.
      */
-    public WebServer(InetSocketAddress addr) throws IOException {
-        this(addr, DEFAULT_BACKLOG);
+    public WebServer(String host, int port) {
+        this(new WebServerConfig.Builder()
+                .host(host)
+                .port(port)
+                .build());
     }
 
     /**
-     * Creates a new Http2Server on the given port and with the given backlog
-     *
-     * @param addr The address to bind to. Cannot be null.
-     * @param backlog The backlog for unhandled new connections. If the value is less than or equal to 0,
-     *                then Java will pick a default value.
-     * @throws IOException If the socket cannot be bound.
+     * Create a new web server with the given configuration.
      */
-    public WebServer(InetSocketAddress addr, int backlog) throws IOException {
-        this.addr = addr; // can be null
+    public WebServer(WebServerConfig config) {
+        this.config = Objects.requireNonNull(config);
+        this.routes = new WebRoutes();
+    }
+
+    /**
+     * Starts the web server. A server cannot be started more than once,
+     * or restarted after it is used.
+     *
+     * @throws IOException If we cannot bind to the configured port
+     * @throws IllegalStateException If the server has ever been started before
+     */
+    public void start() throws IOException {
+        if (lifecycle != Lifecycle.NOT_STARTED) {
+            throw new IllegalStateException("Server has already been started");
+        }
 
         // Create and configure the server socket channel to be non-blocking (NIO)
         this.ssc = ServerSocketChannel.open();
         ssc.configureBlocking(false);
 
-        // Pre-bind if an address was supplied
-        if (addr != null) {
-            this.serverSocket = ssc.socket();
-            serverSocket.bind(addr, backlog);
-            bound = true;
-        }
+        // Bind the socket
+        this.serverSocket = ssc.socket();
+        serverSocket.bind(config.addr(), config.backlog());
 
         // Create the listener key for listening to new connection "accept" events
         this.selector = Selector.open();
         this.listenerKey = ssc.register(selector, SelectionKey.OP_ACCEPT);
-    }
-
-    @Override
-    public void bind(InetSocketAddress addr, int backlog) throws IOException {
-        if (bound) {
-            throw new BindException("Http2Server already bound");
-        }
-
-        // If the server hasn't already been bound, then we will bind it now.
-        this.addr = Objects.requireNonNull(addr);
-        this.serverSocket = ssc.socket();
-        serverSocket.bind(addr, backlog);
-        bound = true;
-    }
-
-    @Override
-    public void start() {
-        if (!bound || started || finished) {
-            throw new IllegalStateException("Server is not bound, or has already started, or has already finished");
-        }
-
-        // Create a default executor if one has not been supplied by the user. Right now I'm using
-        // a single threaded executor to match the behavior of Sun's HttpServer, but I'm not sure
-        // that is actually the best behavior.
-        if (executor == null) {
-            executor = Executors.newSingleThreadExecutor();
-        }
 
         // Create and start the dang thread
-        this.dispatcher = new AcceptHandler(ssc, listenerKey, selector, Duration.ofSeconds(1), executor);
-        this.dispatchThread = new Thread(dispatcher, "HTTP2-Dispatcher");
-        started = true;
+        this.dispatcher = new Dispatcher(ssc, listenerKey, selector, Duration.ofSeconds(1), config.executor());
+        this.dispatchThread = new Thread(dispatcher, "WEB-Dispatcher");
+        lifecycle = Lifecycle.STARTED;
         this.dispatchThread.start();
     }
 
-    @Override
-    public void setExecutor(Executor executor) {
-        if (started) {
-            throw new IllegalStateException("The server is already running");
-        }
-        this.executor = Objects.requireNonNull(executor);
-    }
-
-    @Override
-    public Executor getExecutor() {
-        return this.executor;
-    }
-
-    @Override
-    public void stop(int delay) {
-        if (delay < 0) {
+    /**
+     * Stops the server, throwing an Interrupted exception if stopping takes more than {@code delay}.
+     *
+     * @param delay
+     */
+    public void stop(Duration delay) {
+        if (delay.isNegative()) {
             throw new IllegalArgumentException("The delay must be non-negative");
         }
 
-        this.terminating = true;
+        lifecycle = Lifecycle.FINISHING;
 
         try {
             ssc.close();
@@ -242,7 +183,7 @@ public final class WebServer extends HttpServer {
 //                break;
 //            }
 //        }
-        finished = true;
+        lifecycle = Lifecycle.FINISHED;
         selector.wakeup();
 
 //        synchronized (allConnections) {
@@ -267,74 +208,34 @@ public final class WebServer extends HttpServer {
         }
     }
 
-    @Override
-    public HttpContext createContext(String path, HttpHandler handler) {
-        Objects.requireNonNull(path);
-        Objects.requireNonNull(handler);
-        return contextMap.compute(path, (k, v) -> new HttpContextImpl(this, path, handler));
+    /**
+     * Gets the routes on this server. The same instance is returned every time.
+     *
+     * @return The routes. This will never be null.
+     */
+    public WebRoutes getRoutes() {
+        return routes;
     }
 
-    @Override
-    public HttpContext createContext(String path) {
-        Objects.requireNonNull(path);
-        return contextMap.compute(path, (k, v) -> new HttpContextImpl(this, path));
+    /**
+     * Gets the web server's configuration. The same instance is returned every time.
+     *
+     * @return The server config. This will never be null.
+     */
+    public WebServerConfig getConfig() {
+        return config;
     }
 
-    @Override
-    public void removeContext(String path) throws IllegalArgumentException {
-        Objects.requireNonNull(path);
-        contextMap.remove(path);
+    // Only has a valid value if bound (i.e. if the server has been started).
+
+    /**
+     * Gets the bound {@link InetSocketAddress}. Until the server is started, this method will
+     * always return null. After the server has been started, it will return the bound address.
+     * After the server is stopped, it will return null.
+     *
+     * @return The bound address, if the server is bound, else null.
+     */
+    public InetSocketAddress getBoundAddress() {
+        return ssc == null ? null : (InetSocketAddress) ssc.socket().getLocalSocketAddress();
     }
-
-    @Override
-    public void removeContext(HttpContext context) {
-        Objects.requireNonNull(context);
-        contextMap.remove(context.getPath());
-    }
-
-    @Override
-    public InetSocketAddress getAddress() {
-        return (InetSocketAddress) ssc.socket().getLocalSocketAddress();
-    }
-
-    // TODO: Be sure that the loop that is accepting connections blocks if the total number of concurrent
-    //       connections is met or exceeded.
-
-    private void delay() {
-        Thread.yield();
-        try {
-            Thread.sleep (200);
-        } catch (InterruptedException ignored) {}
-    }
-
-//    private final class Dispatcher implements Runnable {
-//
-//        @Override
-//        public void run() {
-//            while (!finished) {
-//                try {
-//                    selector.select(1000);
-//                    final var selectedKeys = selector.selectedKeys();
-//                    selectedKeys.forEach(key -> {
-//                        try {
-//                            final var channel = ssc.accept();
-//                            channel.configureBlocking(false);
-//                            // TODO: Or, I can use a separate selector for read operations and a separate
-//                            //       thread. Which seems like it may be smarter. Somehow I want to compartmentalize
-//                            //       all this nonsense, because having it all rammed into a single class is yucky.
-//                            final var k2 = channel.register(selector, SelectionKey.OP_READ);
-//                        } catch (IOException e) {
-//                            throw new RuntimeException(e);
-//                        }
-//                    });
-//                } catch (IOException ignored) {
-////                    throw new RuntimeException(e);
-//                }
-//            }
-//        }
-//
-//        void shutdown() {
-//
-//        }
-//    }
 }

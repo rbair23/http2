@@ -7,7 +7,6 @@ import okhttp3.Request;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.Collections;
@@ -15,10 +14,10 @@ import java.util.Collections;
 class EchoTest {
     @Test
     void echo() throws IOException, URISyntaxException, InterruptedException {
-        WebServer server = new WebServer(new InetSocketAddress(0));
+        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
         server.start();
 
-        final var port = server.getAddress().getPort();
+        final var port = server.getBoundAddress().getPort();
         System.out.println("port: " + port);
 
         final var client = new OkHttpClient.Builder()
@@ -50,6 +49,6 @@ class EchoTest {
 
 
 
-        server.stop(1000);
+        server.stop(Duration.ofSeconds(1));
     }
 }
