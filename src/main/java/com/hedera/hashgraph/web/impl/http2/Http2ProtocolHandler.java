@@ -1,5 +1,6 @@
 package com.hedera.hashgraph.web.impl.http2;
 
+import com.hedera.hashgraph.web.WebRoutes;
 import com.hedera.hashgraph.web.impl.ProtocolHandler;
 import com.hedera.hashgraph.web.impl.HttpInputStream;
 import com.hedera.hashgraph.web.impl.HttpOutputStream;
@@ -24,6 +25,10 @@ public class Http2ProtocolHandler implements ProtocolHandler {
     // Map of request id to request handler. Each frame that we read maps to a specific handler, key'd by id.
     private final Map<Integer, Http2RequestHandler> requestHandlers = new HashMap();
     private final Executor threadPool = Executors.newCachedThreadPool();
+
+    public Http2ProtocolHandler(WebRoutes routes) {
+
+    }
 
     @Override
     public void handle(HttpInputStream in, HttpOutputStream out) {

@@ -1,5 +1,11 @@
 package com.hedera.hashgraph.web.impl;
 
+import com.hedera.hashgraph.web.WebHeaders;
+import com.hedera.hashgraph.web.WebRequest;
+import com.hedera.hashgraph.web.WebRoutes;
+import com.hedera.hashgraph.web.impl.http.HttpProtocolHandler;
+import com.hedera.hashgraph.web.impl.http2.Http2ProtocolHandler;
+
 import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.SelectionKey;
@@ -10,76 +16,40 @@ import java.util.Objects;
 import java.util.concurrent.Executor;
 
 /**
- * Handles incoming "accept" TCP connections, and holds onto the socket until it has data ready to be read.
- * At that point, it converts the socket to a blocking read operation, and passes it into a buffer for connections...
+ * The {@code Dispatcher} coordinates the work of the {@link ChannelManager} (which handles all networking
+ * connections with the clients), the {@link ProtocolHandler}s, and the data buffers used by the protocol
+ * handlers. It also manages the {@link Executor} (or thread pool) to which {@link com.hedera.hashgraph.web.WebRequest}s
+ * are sent. There is a single instance of this class per running {@link com.hedera.hashgraph.web.WebServer},
+ * and it executes on a single thread.
  */
 public class Dispatcher implements Runnable {
     private volatile boolean quit;
 
-    private final ServerSocketChannel ssc;
+    private final ChannelManager channelManager;
     private final Executor connectionPool;
-    private final Selector selector;
-    private final SelectionKey listenerKey;
-    private final Duration timeout;
+
+    private final HttpProtocolHandler httpProtocolHandler;
+    private final Http2ProtocolHandler http2ProtocolHandler;
+
+    // If we need a new request object, and we don't already have one,
+    // we will create one. But then we will reuse it later.
+    private final WebRequestImpl headOfUnusedRequests = null;
 
     public Dispatcher(
-            final ServerSocketChannel ssc,
-            final SelectionKey listenerKey,
-            final Selector selector,
-            final Duration selectorTimeout,
+            final ChannelManager channelManager,
+            final WebRoutes routes,
             final Executor connectionPool) {
-        this.ssc = Objects.requireNonNull(ssc);
-        this.listenerKey = Objects.requireNonNull(listenerKey);
+        this.channelManager = Objects.requireNonNull(channelManager);
         this.connectionPool = Objects.requireNonNull(connectionPool);
-        this.selector = Objects.requireNonNull(selector);
-        this.timeout = Objects.requireNonNull(selectorTimeout);
+        this.httpProtocolHandler = new HttpProtocolHandler(routes);
+        this.http2ProtocolHandler = new Http2ProtocolHandler(routes);
     }
 
     @Override
     public void run() {
         while (!quit) {
-            try {
-                selector.select(timeout.toMillis());
-            } catch (IOException e) {
-                System.err.println("Something went wrong while trying to prime the selector");
-                e.printStackTrace();
-            }
+            channelManager.run();
 
-            // Ask the selector for all the selection keys. They may contain a combination of the
-            // "listener" key (which corresponds to "accept" events), or other keys corresponding
-            // to socket channels previously opened, but waiting for their first connection.
-            final var keys = selector.selectedKeys();
-            final var itr = keys.iterator();
-            while (itr.hasNext()) {
-                final var key = itr.next();
-                itr.remove();
-
-                // If the key in the set is the "listener" key, then we have a new socket to accept.
-                // To accept a socket, we will need to get the socket channel and create a new
-                // Http2Connection with all the gory details. We'll hold onto that object until
-                // data is ready to be read. At that point, we'll go ahead and submit the connection
-                // to the executor for handling.
-                if (key == listenerKey) {
-                    accept();
-                } else if (key.isReadable()) {
-                    process(key);
-                }
-            }
-
-            // call the selector just to process the canceled keys (see ServerImpl.java)
-            try {
-                selector.selectNow();
-            } catch (IOException e) {
-                System.err.println("Failed to select. No idea.");
-                e.printStackTrace();
-            }
-        }
-
-        try {
-            selector.close();
-        } catch (IOException e) {
-            System.err.println("Couldn't close selector. Probably non-fatal...");
-            e.printStackTrace();
         }
     }
 
@@ -88,46 +58,34 @@ public class Dispatcher implements Runnable {
         quit = true;
     }
 
-    private void accept() {
-        // If the quit flag has been set, just skip this.
-        if (quit) {
-            return;
+    /**
+     * In HTTP/1.0 or HTTP/1.1, there is one "stream" per connection. In HTTP/2.0, there may be
+     * multiple "streams" per connection. This data is per stream, rather than per connection.
+     */
+    private static final class WebRequestImpl implements WebRequest {
+        // This is null, unless the WebRequestImpl has been closed and is moved into the
+        // "unused" queue. Then it will point to the next web request in the queue.
+        // The queue is a singly-linked list, where instances put back into the queue
+        // are added to the head, and items removed from the queue are removed from the head.
+        // That way we don't need pointers going forward and backward through the queue.
+        // NOTE: We do have to worry about threading here, because multiple requests may
+        // be closed from different threads concurrently, but only a single thread is
+        // fetching an unused request from the queue.
+        private WebRequestImpl next;
+
+        private WebHeaders requestHeaders;
+        private byte[] headerData = new byte[1024];
+        private byte[] bodyData = new byte[1024 * 6];
+        private int bodyLength = 0;
+
+        @Override
+        public void close() throws Exception {
+
         }
 
-        // Go ahead and accept the socket channel and configure it
-        try {
-            final var socketChannel = ssc.accept();
-            if (socketChannel != null) {
-//                // TODO Set TCP_NODELAY, if appropriate
-//                if (ServerConfig.noDelay()) {
-//                    chan.socket().setTcpNoDelay(true);
-//                }
-                socketChannel.configureBlocking(false);
-
-                // SocketChannel keeps a reference to newKey, so I don't have to.
-                final var newKey = socketChannel.register(selector, SelectionKey.OP_READ);
-                final var conn = new ConnectionHandler(socketChannel);
-                newKey.attach(conn);
-            }
-        } catch (ClosedChannelException e) {
-            System.err.println("Channel Closed Prematurely. Might be OK. Not Sure if we should even log it.");
-            e.printStackTrace();
-        } catch (IOException e) {
-            System.err.println("Something else went wrong. Might also be OK. Not sure.");
-            e.printStackTrace();
-        }
-    }
-
-    private void process(SelectionKey key) {
-        try {
-            final var conn = (ConnectionHandler) key.attachment();
-            final var channel = key.channel();
-            key.cancel(); // We no longer need events from this thing. We can just use the channel.
-            channel.configureBlocking(true); // Switch to blocking mode for this data stream
-            connectionPool.execute(conn);
-        } catch (IOException e) {
-            System.err.println("Not sure if I care about this either, something bogus somewhere.");
-            e.printStackTrace();
+        @Override
+        public WebHeaders getRequestHeaders() {
+            return requestHeaders;
         }
     }
 }

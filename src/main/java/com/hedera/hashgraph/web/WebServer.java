@@ -1,6 +1,6 @@
 package com.hedera.hashgraph.web;
 
-import com.hedera.hashgraph.web.impl.AcceptHandler;
+import com.hedera.hashgraph.web.impl.ChannelManager;
 import com.hedera.hashgraph.web.impl.Dispatcher;
 
 import java.io.IOException;
@@ -145,7 +145,8 @@ public final class WebServer {
         this.listenerKey = ssc.register(selector, SelectionKey.OP_ACCEPT);
 
         // Create and start the dang thread
-        this.dispatcher = new Dispatcher(ssc, listenerKey, selector, Duration.ofSeconds(1), config.executor());
+        final var channelManager = new ChannelManager(ssc, listenerKey, selector, Duration.ofSeconds(1));
+        this.dispatcher = new Dispatcher(channelManager, routes, config.executor());
         this.dispatchThread = new Thread(dispatcher, "WEB-Dispatcher");
         lifecycle = Lifecycle.STARTED;
         this.dispatchThread.start();

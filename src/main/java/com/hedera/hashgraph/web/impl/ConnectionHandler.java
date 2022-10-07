@@ -31,7 +31,7 @@ public class ConnectionHandler implements Runnable {
         // Create the protocol. Really, this would happen in a totally different order because we won't
         // know the protocol until we have read some data from te stream (possibly a lot of it,
         // if we have the old deprecated HTTP/2 way of using the HTTP/1.1 headers to determine we want to upgrade
-        final var http2ProtocolHandler = new Http2ProtocolHandler();
+        final var http2ProtocolHandler = new Http2ProtocolHandler(null);
         http2ProtocolHandler.handle(readStream, outStream);
 
         try {
