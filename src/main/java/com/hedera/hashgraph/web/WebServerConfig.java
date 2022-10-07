@@ -18,7 +18,9 @@ public record WebServerConfig(
         InetSocketAddress addr,
         ExecutorService executor,
         int backlog,
-        boolean noDelay) {
+        boolean noDelay,
+        int maxIdleConnections,
+        int maxRequestSize) {
     /**
      * Defines the default value for the backlog.
      * <p>
@@ -35,6 +37,8 @@ public record WebServerConfig(
      * It turns out, if the value is <= 0, then a default backlog value is chosen by Java.
      */
     private static final int DEFAULT_BACKLOG = 0;
+    private static final int DEFAULT_MAX_IDLE_CONNECTIONS = 200 ;
+    private static final int DEFAULT_MAX_REQUEST_SIZE = (1 << 14) + 128; // slightly more than 16K
 
     /*
         Additional configuration we may want
@@ -42,7 +46,7 @@ public record WebServerConfig(
 
         // These values must be a reasonable multiple of clockTick
         private static final long DEFAULT_IDLE_INTERVAL = 30 ; // 5 min
-        private static final int DEFAULT_MAX_IDLE_CONNECTIONS = 200 ;
+
 
         private static final long DEFAULT_MAX_REQ_TIME = -1; // default: forever
         private static final long DEFAULT_MAX_RSP_TIME = -1; // default: forever
@@ -74,7 +78,12 @@ public record WebServerConfig(
     }
 
     public WebServerConfig() {
-        this(new InetSocketAddress("localhost", 0), Executors.newSingleThreadExecutor(), 0, true);
+        this(new InetSocketAddress("localhost", 0),
+                Executors.newSingleThreadExecutor(),
+                0,
+                true,
+                DEFAULT_MAX_IDLE_CONNECTIONS,
+                DEFAULT_MAX_REQUEST_SIZE);
     }
 
     public static final class Builder {
@@ -82,6 +91,8 @@ public record WebServerConfig(
         private int port;
         private InetSocketAddress addr;
         private int backlog;
+        private int maxIdleConnections;
+        private int maxRequestSize;
         private ExecutorService executor;
         private boolean noDelay;
 
@@ -110,6 +121,22 @@ public record WebServerConfig(
             return this;
         }
 
+        public Builder maxIdleConnections(int maxIdleConnections) {
+            if (maxIdleConnections < 1) {
+                throw new IllegalArgumentException("You must have at least 1 idle connection");
+            }
+            this.maxIdleConnections = maxIdleConnections;
+            return this;
+        }
+
+        public Builder maxRequestSize(int maxRequestSize) {
+            if (maxRequestSize < 128) {
+                throw new IllegalArgumentException("The maximum request size must be at least 128 bytes");
+            }
+            this.maxRequestSize = maxRequestSize;
+            return this;
+        }
+
         public Builder noDelay(boolean value) {
             this.noDelay = value;
             return this;
@@ -133,7 +160,7 @@ public record WebServerConfig(
         public WebServerConfig build() {
             final var a = addr == null ? new InetSocketAddress(host, port) : addr;
             final var e = executor == null ? Executors.newSingleThreadExecutor() : executor;
-            return new WebServerConfig(a, e, backlog, noDelay);
+            return new WebServerConfig(a, e, backlog, noDelay, maxIdleConnections, maxRequestSize);
         }
     }
 }

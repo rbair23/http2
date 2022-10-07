@@ -71,6 +71,11 @@ public final class WebServer {
     private Dispatcher dispatcher;
 
     /**
+     * Responsible for managing connections.
+     */
+    private ChannelManager channelManager;
+
+    /**
      * This thread is used for running the dispatcher. It is created on {@link #start()}
      * and cleared when the server stops.
      */
@@ -127,7 +132,7 @@ public final class WebServer {
         serverSocket.bind(config.addr(), config.backlog());
 
         // Create and start the dang thread
-        final var channelManager = new ChannelManager(ssc, config.noDelay());
+        this.channelManager = new ChannelManager(ssc, config.noDelay());
         this.dispatcher = new Dispatcher(config, routes, config.executor(), channelManager);
         this.dispatchThread = new Thread(dispatcher, "WEB-Dispatcher");
         lifecycle = Lifecycle.STARTED;
@@ -152,8 +157,9 @@ public final class WebServer {
         }
 
 //        this.selector.wakeup();
-
-        this.dispatcher.shutdown();
+        config.executor().shutdown();
+        channelManager.shutdown();
+        dispatcher.shutdown();
 //        // TODO Replace the use of System.currentTimeMillis with something like from platform that
 //        //      lets me fake out the time for testing purposes.
 //        long latest = System.currentTimeMillis() + delay * 1000L;

@@ -7,6 +7,7 @@ import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -86,45 +87,48 @@ public final class ChannelManager {
      * done with this instance.
      *
      * @param timeout Specifies the duration of time to block while waiting for events on idle connections.
+     * @param availableConnectionCount The number of available connections that can still be made
      * @param onRead A callback invoked for each {@link SelectionKey} that has data ready to be read
      */
-    public void checkConnections(final Duration timeout, final Consumer<SelectionKey> onRead) {
-        try {
-            // Check for available keys. This call blocks until either some keys are available,
-            // or until the timeout is reached.
-            int numKeysAvailable = selector.select(timeout.toMillis());
+    public void checkConnections(
+            final Duration timeout,
+            final AtomicInteger availableConnectionCount,
+            final Consumer<SelectionKey> onRead) throws IOException {
+        // TODO does the onRead need to tell me whether data was actually read or not? I think probably it does,
+        //      otherwise I maybe shouldn't remove the key from the iterator...
 
-            // We found no keys, so we can just return.
-            if (numKeysAvailable == 0) {
-                return;
-            }
+        // Check for available keys. This call blocks until either some keys are available,
+        // or until the timeout is reached.
+        int numKeysAvailable = selector.select(timeout.toMillis());
 
-            // TODO I'm worried about this. Having the accept selector and the read selector be the same
-            //      and processed by the same thread may mean I can accept at most one new connection
-            //      per iteration of the connections. That could slow the rate of new connections to some
-            //      unacceptable level. I may need two threads, one for handling new connections and
-            //      one for processing existing connections with data.
-            // Get the keys. They may be of two kinds. The set may contain the "acceptKey" indicating
-            // that there is a new connection. Or it may contain one or more other keys that correspond
-            // to a particular connection that has data to be read. For each of these, simply call the
-            // onRead lambda with the key.
-            final var keys = selector.selectedKeys();
-            final var itr = keys.iterator();
-            while (itr.hasNext() && !shutdown) {
-                final var key = itr.next();
+        // We found no keys, so we can just return.
+        if (numKeysAvailable == 0) {
+            return;
+        }
+
+        // TODO I'm worried about this. Having the accept selector and the read selector be the same
+        //      and processed by the same thread may mean I can accept at most one new connection
+        //      per iteration of the connections. That could slow the rate of new connections to some
+        //      unacceptable level. I may need two threads, one for handling new connections and
+        //      one for processing existing connections with data.
+        // Get the keys. They may be of two kinds. The set may contain the "acceptKey" indicating
+        // that there is a new connection. Or it may contain one or more other keys that correspond
+        // to a particular connection that has data to be read. For each of these, simply call the
+        // onRead lambda with the key.
+        final var keys = selector.selectedKeys();
+        final var itr = keys.iterator();
+        while (itr.hasNext() && !shutdown) {
+            final var key = itr.next();
+
+            // If the key in the set is the "acceptKey", then we have a new connection to accept.
+            // To accept a connection, we will need to get the socket channel
+            if (key == acceptKey && availableConnectionCount.get() > 0) {
                 itr.remove();
-
-                // If the key in the set is the "acceptKey", then we have a new connection to accept.
-                // To accept a connection, we will need to get the socket channel
-                if (key == acceptKey) {
-                    accept();
-                } else if (key.isReadable()) {
-                    onRead.accept(key);
-                }
+                accept();
+            } else if (key.isReadable()) {
+                itr.remove();
+                onRead.accept(key);
             }
-        } catch (IOException e) {
-            System.err.println("Failed to select. This is probably an unrecoverable server error!!!");
-            e.printStackTrace();
         }
     }
 

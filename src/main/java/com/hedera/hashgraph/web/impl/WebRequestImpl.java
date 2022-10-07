@@ -14,11 +14,12 @@ import java.util.Objects;
  *
  * // TODO Turn into a record, this is not reused.
  */
-public final class WebRequestImpl implements WebRequest {
-    private WebHeaders requestHeaders;
-
-    public WebRequestImpl(WebHeaders requestHeaders) {
-        this.requestHeaders = Objects.requireNonNull(requestHeaders);
+public record WebRequestImpl(String method, String path, String version, WebHeaders requestHeaders) implements WebRequest {
+    public WebRequestImpl {
+        Objects.requireNonNull(method);
+        Objects.requireNonNull(path);
+        Objects.requireNonNull(version);
+        Objects.requireNonNull(requestHeaders);
     }
 
     @Override

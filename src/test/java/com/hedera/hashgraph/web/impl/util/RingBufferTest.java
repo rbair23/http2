@@ -1,4 +1,4 @@
-package com.hedera.hashgraph.web.impl;
+package com.hedera.hashgraph.web.impl.util;
 
 import com.hedera.hashgraph.web.impl.util.RingBuffer;
 import org.junit.jupiter.api.Test;

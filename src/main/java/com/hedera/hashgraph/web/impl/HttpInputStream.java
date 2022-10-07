@@ -226,12 +226,12 @@ public final class HttpInputStream {
      * there is another byte to be read. If not, rather than throwing an exception, the value -1 is
      * returned.
      *
-     * @return A single byte, as a char.
+     * @return A single byte, as an integer.
      */
-    public char readByteSafely() {
+    public int readByteSafely() {
         return available(1)
-                ? (char) buffer[readPosition++]
-                : (char) -1;
+                ? (int) buffer[readPosition++]
+                : -1;
     }
 
     /**
