@@ -91,7 +91,7 @@ public final class HeadersFrame extends Frame {
         final var extraBytesRead = (paddedFlag ? 1 : 0) + (priorityFlag ? 5 : 0);
         final var blockDataLength = frameLength - (padLength + extraBytesRead);
         final byte[] fieldBlockFragment = new byte[blockDataLength];
-        in.readBytes(fieldBlockFragment, blockDataLength);
+        in.readBytes(fieldBlockFragment, 0, blockDataLength);
         in.skip(padLength);
 
         return new HeadersFrame(flags, streamId, padLength, exclusive, streamDependency, weight, fieldBlockFragment);

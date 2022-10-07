@@ -6,23 +6,20 @@ import com.hedera.hashgraph.web.WebRequest;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Objects;
 
 /**
  * In HTTP/1.0 or HTTP/1.1, there is one "stream" per connection. In HTTP/2.0, there may be
  * multiple "streams" per connection. This data is per stream, rather than per connection.
+ *
+ * // TODO Turn into a record, this is not reused.
  */
-final class WebRequestImpl implements WebRequest {
-    private enum State {
-        COLLECTING_HEADERS,
-        COLLECTING_BODY,
-        READY
-    }
-
-    private WebRequestImpl.State state = WebRequestImpl.State.COLLECTING_HEADERS;
+public final class WebRequestImpl implements WebRequest {
     private WebHeaders requestHeaders;
-    private byte[] headerData = new byte[1024];
-    private byte[] bodyData = new byte[1024 * 6];
-    private int bodyLength = 0;
+
+    public WebRequestImpl(WebHeaders requestHeaders) {
+        this.requestHeaders = Objects.requireNonNull(requestHeaders);
+    }
 
     @Override
     public void close() {

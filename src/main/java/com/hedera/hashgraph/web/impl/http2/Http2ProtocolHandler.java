@@ -18,7 +18,7 @@ import java.util.concurrent.Executors;
 public class Http2ProtocolHandler implements ProtocolHandler {
     private static final byte[] CONNECTION_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes();
     private static final int CONNECTION_PREFACE_LENGTH = CONNECTION_PREFACE.length;
-    private static final long FRAME_HEADER_SIZE = 9;
+    private static final int FRAME_HEADER_SIZE = 9;
 
     private final Settings settings = new Settings();
 
@@ -72,7 +72,7 @@ public class Http2ProtocolHandler implements ProtocolHandler {
             // That is, the connection preface ... MUST be followed by a SETTINGS frame...
             // Clients and servers MUST treat an invalid connection preface as a connection error (Section 5.4.1) of
             // type PROTOCOL_ERROR.
-            final var nextFrameType = in.pollByte(3); // skip the next frame length
+            final var nextFrameType = in.peekByte(3); // skip the next frame length
             if (nextFrameType != FrameTypes.SETTINGS.ordinal()) {
                 throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR);
             }
@@ -105,7 +105,7 @@ public class Http2ProtocolHandler implements ProtocolHandler {
 
 
     private void handleFrame(HttpInputStream in, HttpOutputStream out) throws IOException {
-        final var type = FrameTypes.fromOrdinal(in.pollByte(3));
+        final var type = FrameTypes.fromOrdinal(in.peekByte(3));
         switch (type) {
             case SETTINGS -> handleSettings(in, out);
             case WINDOW_UPDATE -> handleWindowUpdate(in, out);
@@ -121,7 +121,7 @@ public class Http2ProtocolHandler implements ProtocolHandler {
     }
 
     private void skipUnknownFrame(HttpInputStream in) throws IOException {
-        final var frameLength = in.poll24BitInteger();
+        final var frameLength = in.peek24BitInteger();
         in.skip(frameLength + FRAME_HEADER_SIZE);
     }
 

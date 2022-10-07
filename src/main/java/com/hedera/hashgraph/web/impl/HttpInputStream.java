@@ -170,7 +170,7 @@ public final class HttpInputStream {
      * @return A single byte
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
-    public byte pollByte() {
+    public byte peekByte() {
         assertAvailable(1);
         return buffer[readPosition];
     }
@@ -182,7 +182,7 @@ public final class HttpInputStream {
      * @return A single byte
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
-    public byte pollByte(int numBytesToLookPast) {
+    public byte peekByte(int numBytesToLookPast) {
         assertAvailable(1 + numBytesToLookPast);
         return buffer[this.readPosition + numBytesToLookPast];
     }
@@ -198,7 +198,7 @@ public final class HttpInputStream {
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public void readBytes(byte[] dst, int dstOffset, int numBytes) {
-        pollBytes(dst, dstOffset, numBytes);
+        peekBytes(dst, dstOffset, numBytes);
         this.readPosition += numBytes;
     }
 
@@ -212,7 +212,7 @@ public final class HttpInputStream {
      * @param numBytes The number of bytes to read from the underlying stream
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
-    public void pollBytes(byte[] dst, int dstOffset, int numBytes) {
+    public void peekBytes(byte[] dst, int dstOffset, int numBytes) {
         if (numBytes <= 0) {
             return;
         }
@@ -241,7 +241,7 @@ public final class HttpInputStream {
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public int read16BitInteger() {
-        final var i = poll16BitInteger();
+        final var i = peek16BitInteger();
         this.readPosition += 2;
         return i;
     }
@@ -253,7 +253,7 @@ public final class HttpInputStream {
      * @return An unsigned 16-bit integer
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
-    public int poll16BitInteger() {
+    public int peek16BitInteger() {
         assertAvailable(2);
         return buffer[readPosition] << 8 | buffer[readPosition + 1];
     }
@@ -265,7 +265,7 @@ public final class HttpInputStream {
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public int read24BitInteger() {
-        final var i = poll24BitInteger();
+        final var i = peek24BitInteger();
         this.readPosition += 3;
         return i;
     }
@@ -277,7 +277,7 @@ public final class HttpInputStream {
      * @return An unsigned 24-bit integer
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
-    public int poll24BitInteger() {
+    public int peek24BitInteger() {
         assertAvailable(3);
         return buffer[readPosition] << 16 | buffer[readPosition + 1] << 8 | buffer[readPosition + 2];
     }
@@ -290,7 +290,7 @@ public final class HttpInputStream {
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public int read31BitInteger() {
-        final var i = poll31BitInteger();
+        final var i = peek31BitInteger();
         this.readPosition += 4;
         return i;
     }
@@ -302,8 +302,8 @@ public final class HttpInputStream {
      * @return An unsigned 31-bit integer
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
-    public int poll31BitInteger() {
-        int result = poll32BitInteger();
+    public int peek31BitInteger() {
+        int result = peek32BitInteger();
         result &= 0x7FFFFFFF; // Strip off the high bit, setting it to 0
         return result;
     }
@@ -316,7 +316,7 @@ public final class HttpInputStream {
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public int read32BitInteger() {
-        final var i = poll32BitInteger();
+        final var i = peek32BitInteger();
         this.readPosition += 4;
         return i;
     }
@@ -328,7 +328,7 @@ public final class HttpInputStream {
      * @return An unsigned 32-bit integer
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
-    public int poll32BitInteger() {
+    public int peek32BitInteger() {
         assertAvailable(4);
         int result = buffer[readPosition] << 24;
         result |= buffer[readPosition + 1] << 16;
@@ -345,7 +345,7 @@ public final class HttpInputStream {
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public long read64BitLong() {
-        final var i = poll64BitLong();
+        final var i = peek64BitLong();
         this.readPosition += 8;
         return i;
     }
@@ -357,7 +357,7 @@ public final class HttpInputStream {
      * @return A 64-bit long
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
-    public long poll64BitLong() {
+    public long peek64BitLong() {
         assertAvailable(8);
         long result = asLongNoSignExtend(buffer[readPosition]) << 56;
         result |= asLongNoSignExtend(buffer[readPosition + 1]) << 48;
@@ -373,7 +373,7 @@ public final class HttpInputStream {
     /**
      * Checks whether the stream, starting from the current position in the stream, matches exactly the elements
      * of the given byte array. This method <strong>does not</strong> advance the read position in the stream, so
-     * it acts as a poll or look-ahead.
+     * it acts as a peek or look-ahead.
      *
      * @param bytes The bytes to look up. Cannot be null, and must be less than the size configured in this stream's
      *              constructor.
