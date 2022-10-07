@@ -24,11 +24,6 @@ import java.util.Objects;
  */
 public final class HttpInputStream {
     /**
-     * The underlying {@link SocketChannel} from which we will read the data.
-     */
-    private final SocketChannel channel;
-
-    /**
      * The buffer into which data is read. The buffer may not be full (i.e. when we last read
      * from the stream, we may have only filled part of the buffer). When the buffer does get
      * full, we move unread data to the front of the buffer and continue filling.
@@ -51,29 +46,50 @@ public final class HttpInputStream {
     private int readPosition = 0;
 
     /**
-     * The index into the buffer where the very last bytes that have been read from the
-     * {@link #channel} have been stored. This index is <strong>exclusive</strong>, so
-     * it is just 1 past the very last byte read.
+     * The index into the buffer where the very last bytes that have been written. This index is
+     * <strong>exclusive</strong>, so it is just 1 past the very last byte read.
      */
     private int endPosition = 0;
 
     /**
+     * A pointer to the index at which we will respond to "peek" requests. This index can be moved around
+     * by the user, and is reset to match {@link #readPosition} whenever the {@link #readPosition} changes.
+     */
+    private int peekPosition = 0;
+
+    /**
      * Creates a new {@code HttpInputStream}.
      *
-     * @param channel The channel from which to read data. Cannot be null.
      * @param size The size of the buffer to use. This must be positive, and generally, should be at least a few
      *             hundred bytes. The size must be larger than any one block of bytes that will be read at some
      *             point later. For example, if a client tries to read a 1K byte array from the stream but the
      *             buffer within the stream is less than 1K, an exception will be thrown.
      */
-    protected HttpInputStream(final SocketChannel channel, final int size) {
+    protected HttpInputStream(final int size) {
         if (size <= 0) {
             throw new IllegalArgumentException("The size must be positive");
         }
 
-        this.channel = Objects.requireNonNull(channel);
         this.buffer = new byte[size];
         this.bb = ByteBuffer.wrap(this.buffer);
+    }
+
+    void addData(SocketChannel channel) throws IOException {
+        // If the buffer is already full, we need to shift
+        if (this.endPosition == buffer.length) {
+            shift();
+        }
+
+        // If we haven't read all the bytes we'd like to, but we've
+        final var numReadBytes = channel.read(bb);
+        if (numReadBytes > 1) {
+            // We read something, so that is good. Update the endPosition and return the number of bytes read
+            endPosition += numReadBytes;
+        }
+    }
+
+    public boolean available(int numBytes) {
+        return (endPosition - readPosition) >= numBytes;
     }
 
     /**
@@ -84,22 +100,34 @@ public final class HttpInputStream {
      * @param length The length
      * @throws IOException Thrown if the underlying channel is closed prematurely or otherwise throws the exception.
      */
-    public void skip(final long length) throws IOException {
-        long bytesRead = 0;
-        while (bytesRead < length) {
-            final var remainingBytes = this.endPosition - this.readPosition;
-            if (length > remainingBytes) {
-                bytesRead += remainingBytes;
-                this.readPosition = this.endPosition;
-                if (loadMoreData() == -1) {
-                    // We have reached the end.
-                    return;
-                }
-            } else {
-                this.readPosition += length;
-                return;
-            }
+    public void skip(final int length) throws IOException {
+        if (!available(length)) {
+            throw new IllegalArgumentException("Not enough bytes available, please check available first");
         }
+
+        setReadPosition(readPosition + length);
+    }
+
+    private void setReadPosition(int value) {
+        this.readPosition = value;
+        this.peekPosition = value;
+    }
+
+    public char readChar() {
+        return (char) -1;
+    }
+
+    public char pollChar() {
+        return (char) -1;
+    }
+
+    // could be misinterpreted as position instead of relative skip bytes
+    public char pollChar(int skipBytes) {
+        return (char) -1;
+    }
+
+    public char peekChar() { // moves pointers. Oh, joy.
+        return (char) -1;
     }
 
     /**
@@ -111,7 +139,7 @@ public final class HttpInputStream {
      */
     public byte readByte() throws IOException {
         final var b = pollByte();
-        this.readPosition++;
+        setReadPosition(readPosition + 1);
         return b;
     }
 
@@ -136,7 +164,7 @@ public final class HttpInputStream {
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
     public byte pollByte(int numBytesToLookPast) throws IOException {
-        loadIfNeededOrThrow(1 + numBytesToLookPast);
+//        loadIfNeededOrThrow(1 + numBytesToLookPast);
         return buffer[this.readPosition + numBytesToLookPast];
     }
 
@@ -170,7 +198,7 @@ public final class HttpInputStream {
             return;
         }
 
-        loadIfNeededOrThrow(numBytes);
+//        loadIfNeededOrThrow(numBytes);
         System.arraycopy(buffer, this.readPosition, array, 0, numBytes);
     }
 
@@ -196,7 +224,7 @@ public final class HttpInputStream {
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
     public int poll16BitInteger() throws IOException {
-        loadIfNeededOrThrow(2);
+//        loadIfNeededOrThrow(2);
         return buffer[readPosition] << 8 | buffer[readPosition + 1];
     }
 
@@ -222,7 +250,7 @@ public final class HttpInputStream {
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
     public int poll24BitInteger() throws IOException {
-        loadIfNeededOrThrow(3);
+//        loadIfNeededOrThrow(3);
         return buffer[readPosition] << 16 | buffer[readPosition + 1] << 8 | buffer[readPosition + 2];
     }
 
@@ -277,7 +305,7 @@ public final class HttpInputStream {
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
     public int poll32BitInteger() throws IOException {
-        loadIfNeededOrThrow(4);
+//        loadIfNeededOrThrow(4);
         int result = buffer[readPosition] << 24;
         result |= buffer[readPosition + 1] << 16;
         result |= buffer[readPosition + 2] << 8;
@@ -308,7 +336,7 @@ public final class HttpInputStream {
      * @throws EOFException If an attempt is made to read a byte past the end of the stream.
      */
     public long poll64BitLong() throws IOException {
-        loadIfNeededOrThrow(8);
+//        loadIfNeededOrThrow(8);
         long result = asLongNoSignExtend(buffer[readPosition]) << 56;
         result |= asLongNoSignExtend(buffer[readPosition + 1]) << 48;
         result |= asLongNoSignExtend(buffer[readPosition + 2]) << 40;
@@ -346,36 +374,8 @@ public final class HttpInputStream {
             throw new IllegalArgumentException("The supplied byte array was larger than the buffer of this stream");
         }
 
-        loadIfNeededOrThrow(bytes.length);
+//        loadIfNeededOrThrow(bytes.length);
         return Arrays.equals(buffer, readPosition, readPosition + bytes.length, bytes, 0, bytes.length);
-    }
-
-    /**
-     * Attempts to make sure the given number of bytes are available in the buffer. If needed, this method
-     * will load data from the channel and shift the contents of the buffer to make room.
-     *
-     * @param numBytes The number of bytes to load. This MUST NOT be greater than the buffer size
-     * @throws IOException
-     * @throws EOFException
-     */
-    private void loadIfNeededOrThrow(int numBytes) throws IOException {
-        assert numBytes <= buffer.length;
-
-        // Check to see if we have enough available bytes in the buffer already
-        final var remainingBytes = this.endPosition - this.readPosition;
-        if (remainingBytes < numBytes) {
-            // We did not have enough available bytes in the buffer. So go into a loop until
-            // we have finally loaded enough bytes.
-            var totalBytesRead = remainingBytes;
-            while (totalBytesRead < numBytes) {
-                final var bytesRead = loadMoreData();
-                totalBytesRead += bytesRead;
-                // If we get back -1, we have reached the EOF before we had enough bytes.
-                if (bytesRead == -1) {
-                    throw new EOFException();
-                }
-            }
-        }
     }
 
     /**
@@ -389,39 +389,5 @@ public final class HttpInputStream {
         readPosition = 0;
         endPosition = remainingBytes;
         bb.position(endPosition);
-    }
-
-    /**
-     * Read the next chunk of bytes, and return the number of bytes that were read. If the buffer has been filled,
-     * then shift the bytes around to make additional room. Attempts to read until more than 1 byte has been read,
-     * or the stream has been closed.
-     *
-     * @return The number of bytes read, or -1 if none were read and the stream was closed.
-     * @throws IOException
-     */
-    private int loadMoreData() throws IOException {
-        // If the buffer is already full, we need to shift
-        if (this.endPosition == buffer.length) {
-            shift();
-        }
-
-        // The number of bytes that were read from the channel
-        int numReadBytes;
-
-        // If we haven't read all the bytes we'd like to, but we've
-        while ((numReadBytes = channel.read(bb)) != -1) {
-            // If we failed to read any bytes, then there is nothing to do but try again.
-            if (numReadBytes == 0) {
-                break;
-            }
-
-            // We read something, so that is good. Update the endPosition and return the number of bytes read
-            endPosition += numReadBytes;
-            return numReadBytes;
-        }
-
-        // The only way to get here is if numBytesRead is -1.
-        assert numReadBytes == -1;
-        return -1;
     }
 }
