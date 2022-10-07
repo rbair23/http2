@@ -112,6 +112,15 @@ public final class HttpInputStream {
     }
 
     /**
+     * Called to reset this instance.
+     */
+    void reset() {
+        this.markedPosition = -1;
+        this.readPosition = 0;
+        this.endPosition = 0;
+    }
+
+    /**
      * Sets the mark position to the current position in the stream. {@link #clearMark()} will reset
      * the stream position to the mark.
      */

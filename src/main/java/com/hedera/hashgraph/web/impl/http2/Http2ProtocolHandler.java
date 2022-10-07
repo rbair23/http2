@@ -1,6 +1,7 @@
 package com.hedera.hashgraph.web.impl.http2;
 
 import com.hedera.hashgraph.web.WebRoutes;
+import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.impl.ProtocolHandler;
 import com.hedera.hashgraph.web.impl.HttpInputStream;
 import com.hedera.hashgraph.web.impl.HttpOutputStream;
@@ -10,8 +11,10 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.function.BiConsumer;
 
 // Right now, this is created per-thread. To be reused across threads, we have to do some kind of per-thread state,
 // such as for settings and request handlers.
@@ -25,15 +28,18 @@ public class Http2ProtocolHandler implements ProtocolHandler {
     // Map of request id to request handler. Each frame that we read maps to a specific handler, key'd by id.
     private final Map<Integer, Http2RequestHandler> requestHandlers = new HashMap();
     private final Executor threadPool = Executors.newCachedThreadPool();
+    private final WebRoutes routes;
 
     public Http2ProtocolHandler(WebRoutes routes) {
-
+        this.routes = Objects.requireNonNull(routes);
     }
 
     @Override
-    public void handle(HttpInputStream in, HttpOutputStream out) {
-
+    public void handle(Dispatcher.ChannelData data, BiConsumer<Dispatcher.ChannelData, Dispatcher.RequestData> doDispatch) {
         try {
+            final var in = data.getIn();
+            final var out = data.getOut();
+
             // SPEC: 3.4 HTTP/2 Connection Preface
             // The client sends the client connection preface as the first application data octets of a connection.
             handlePreface(in, out);
@@ -54,6 +60,21 @@ public class Http2ProtocolHandler implements ProtocolHandler {
             // TODO write the response frame out for this error.
             e.printStackTrace();
         }
+    }
+
+    @Override
+    public void handleError(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData, RuntimeException ex) {
+
+    }
+
+    @Override
+    public void endOfRequest(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData) {
+
+    }
+
+    @Override
+    public void handleNoHandlerError(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData) {
+
     }
 
     private void handlePreface(HttpInputStream in, HttpOutputStream out) throws IOException {

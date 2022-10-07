@@ -47,7 +47,7 @@ public final class WebServer {
      * until reaching {@link Lifecycle#FINISHED}. It moves linearly through states and never goes
      * back to any previous state. Once used, a web server cannot be reused.
      */
-    private volatile Lifecycle lifecycle;
+    private volatile Lifecycle lifecycle = Lifecycle.NOT_STARTED;
 
     //-------------- All fields below are related to a running server only
 

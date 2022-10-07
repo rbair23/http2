@@ -91,8 +91,8 @@ public record WebServerConfig(
         private int port;
         private InetSocketAddress addr;
         private int backlog;
-        private int maxIdleConnections;
-        private int maxRequestSize;
+        private int maxIdleConnections = DEFAULT_MAX_IDLE_CONNECTIONS;
+        private int maxRequestSize = DEFAULT_MAX_REQUEST_SIZE;
         private ExecutorService executor;
         private boolean noDelay;
 
