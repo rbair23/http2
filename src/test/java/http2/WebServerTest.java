@@ -31,6 +31,7 @@ public class WebServerTest {
                 .host("localhost")
                 .port(0)
                 .backlog(120)
+                .noDelay(true)
                 .build());
         server.getRoutes().put("/store", request -> {
             // ...

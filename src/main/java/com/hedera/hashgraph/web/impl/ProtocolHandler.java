@@ -10,5 +10,8 @@ import java.util.function.Consumer;
  */
 public interface ProtocolHandler {
     default void handle(HttpInputStream in, HttpOutputStream out) { }
-    default ProtocolHandler handle2(SocketChannel channel, WebRequestImpl req, Runnable doDispatch) { return this; }
+
+
+    default void handle2(Dispatcher.RequestData requestData, Consumer<Dispatcher.RequestData> doDispatch) {
+    }
 }

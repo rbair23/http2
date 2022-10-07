@@ -11,6 +11,26 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
 /**
+ * Attack Vectors:
+ *   - Open a bunch of connections but don't send data, or just send pings
+ *      - Make sure TCP_TIMEOUT is set to a reasonable value
+ *      - Have a reasonable configuration for max amount of time a connection can be open
+ *          - Also covers the case where data is dribbling in slowly
+ *      - Find the right value for the size of backlog of connections
+ *      - Close an idle connection that isn't sending data
+ *   - A connection sends too many header values (too much header data)
+ *      - Detect too much header data and close with error
+ *   - A connection wants to send more data than it should
+ *      - Detect and close with error
+ *   - A connection is valid but sends garbage header data
+ *      - We won't detect the garbage header data until we go to parse it, which happens later.
+ *        So we're just open to this kind of attack.
+ *   - Somebody sends completely random garbage data for the header. Can they exploit us?
+ *      - The parser has to be careful about things like max-key-size, max-value-size, and
+ *        throw exceptions on any parse errors.
+ *      - No code execution (sql injection, etc.) is possible at this phase
+ *      - Mitigate with fuzz testing
+ *
  * The {@code Dispatcher} coordinates the work of the {@link ChannelManager} (which handles all networking
  * connections with the clients), the {@link ProtocolHandler}s, and the data buffers used by the protocol
  * handlers. It also manages the {@link ExecutorService} (or thread pool) to which
@@ -51,7 +71,7 @@ public class Dispatcher implements Runnable {
     // NOTE: We do have to worry about threading here, because multiple requests may
     // be closed from different threads concurrently, but only a single thread is
     // fetching an unused request from the queue.
-    private Data headOfUnusedData = null;
+    private RequestData headOfUnusedData = null;
 
     public Dispatcher(
             final WebServerConfig config,
@@ -77,30 +97,15 @@ public class Dispatcher implements Runnable {
                 // an attachment, then it means we've seen this key before, so we can just
                 // reuse it. If we haven't seen it before, then we'll get a Data and get
                 // it setup.
-                var data = (Data) key.attachment();
+                var data = (RequestData) key.attachment();
                 if (data == null) {
                     data = checkoutData();
                     data.channel = (SocketChannel) key.channel();
                     key.attach(data);
                 }
 
-                // Delegate to the protocol handler! The return value is the protocol handler to use
-                // next time. It is possible, for example, for an HTTP 1 protocol handler to "upgrade"
-                // to HTTP/2, or web sockets, or some other protocol.
-                final var d = data;
-                data.protocolHandler = data.protocolHandler.handle2(data.channel, data.req, () -> {
-                    // This callback is invoked when it is time to submit the request.
-                    try (d) {
-                        final var method = d.req.getRequestMethod();
-                        final var path = d.req.getPath();
-                        final var handler = routes.match(method, path);
-                        if (handler != null) {
-                            handler.handle(d.req);
-                        }
-                    }
-
-                    returnData(d);
-                });
+                // Delegate to the protocol handler!
+                data.protocolHandler.handle2(data, this::dispatch);
             });
         }
     }
@@ -115,9 +120,23 @@ public class Dispatcher implements Runnable {
         }
     }
 
-    private synchronized Data checkoutData() {
+    private void dispatch(RequestData reqData) {
+        // This callback is invoked when it is time to submit the request.
+        try (reqData) {
+            final var method = reqData.req.getRequestMethod();
+            final var path = reqData.req.getPath();
+            final var handler = routes.match(method, path);
+            if (handler != null) {
+                handler.handle(reqData.req);
+            }
+        }
+
+        returnData(reqData);
+    }
+
+    private synchronized RequestData checkoutData() {
         if (headOfUnusedData == null) {
-            return new Data(httpProtocolHandler);
+            return new RequestData(httpProtocolHandler);
         } else {
             final var data = headOfUnusedData;
             headOfUnusedData = data.next;
@@ -126,7 +145,7 @@ public class Dispatcher implements Runnable {
         }
     }
 
-    private void returnData(Data data) {
+    private void returnData(RequestData data) {
         Objects.requireNonNull(data);
         synchronized (this) {
             data.next = headOfUnusedData;
@@ -134,7 +153,7 @@ public class Dispatcher implements Runnable {
         }
     }
 
-    private static final class Data implements AutoCloseable {
+    public final class RequestData implements AutoCloseable {
         private final WebRequestImpl req = new WebRequestImpl();
         private final ProtocolHandler initialHandler;
 
@@ -143,11 +162,11 @@ public class Dispatcher implements Runnable {
         // The queue is a singly-linked list, where instances put back into the queue
         // are added to the head, and items removed from the queue are removed from the head.
         // That way we don't need pointers going forward and backward through the queue.
-        private Data next;
+        private RequestData next;
         private SocketChannel channel;
         private ProtocolHandler protocolHandler;
 
-        Data(ProtocolHandler initialHandler) {
+        RequestData(ProtocolHandler initialHandler) {
             this.initialHandler = Objects.requireNonNull(initialHandler);
             this.protocolHandler = initialHandler;
         }
