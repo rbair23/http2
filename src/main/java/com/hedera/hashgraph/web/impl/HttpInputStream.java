@@ -52,10 +52,10 @@ public final class HttpInputStream {
     private int endPosition = 0;
 
     /**
-     * A pointer to the index at which we will respond to "peek" requests. This index can be moved around
-     * by the user, and is reset to match {@link #readPosition} whenever the {@link #readPosition} changes.
+     * Track where the {@link #readPosition} was at the time of {@link #mark()}. -1 indicates that
+     * it has not been set.
      */
-    private int peekPosition = 0;
+    private int markedPosition = -1;
 
     /**
      * Creates a new {@code HttpInputStream}.
@@ -110,24 +110,26 @@ public final class HttpInputStream {
 
     private void setReadPosition(int value) {
         this.readPosition = value;
-        this.peekPosition = value;
     }
 
     public char readChar() {
         return (char) -1;
     }
 
-    public char pollChar() {
-        return (char) -1;
+    /**
+     * Sets the mark position to the current position in the stream. {@link #clearMark()} will reset
+     * the stream position to the mark.
+     */
+    public void mark() {
+
     }
 
-    // could be misinterpreted as position instead of relative skip bytes
-    public char pollChar(int skipBytes) {
-        return (char) -1;
-    }
+    /**
+     * Clears the mark. Method is idempotent. Resets the current position in the stream to the marked
+     * location.
+     */
+    public void clearMark() {
 
-    public char peekChar() { // moves pointers. Oh, joy.
-        return (char) -1;
     }
 
     /**
