@@ -498,6 +498,11 @@ public final class Dispatcher implements Runnable {
         private int stateFlags = 0;
 
         /**
+         * Temporary string used for storing partially parsed data
+         */
+        private String tempString;
+
+        /**
          * Create a new instance
          *
          * @param bufferSize the size of the buffer (make it large enough but not too large!)
@@ -514,6 +519,7 @@ public final class Dispatcher implements Runnable {
             method = null;
             path = null;
             version = null;
+            tempString = null;
             returnRequestData(this);
         }
 
@@ -619,6 +625,14 @@ public final class Dispatcher implements Runnable {
         public void setVersion(String version) {
             this.version = version;
             System.out.println("version = " + version);
+        }
+
+        public String getTempString() {
+            return tempString;
+        }
+
+        public void setTempString(String tempString) {
+            this.tempString = tempString;
         }
     }
 }
