@@ -425,6 +425,13 @@ public final class Dispatcher implements Runnable {
                 }
             }
         }
+
+        public RequestData getSingleStreamData() {
+            if (singleStreamData == null) {
+                singleStreamData = checkoutRequestData();
+            }
+            return singleStreamData;
+        }
     }
 
     /**
@@ -434,10 +441,23 @@ public final class Dispatcher implements Runnable {
      */
     public final class RequestData implements AutoCloseable {
 
-        private enum State {
-            COLLECTING_HEADERS,
+        /**
+         * Enum for parse states of a HTTP Request
+         *
+         *  - BEGIN - before the start of file
+         *  - METHOD URI VERSION HTTP2_PREFACE? - Start file
+         *  - HEADER_KEY HEADER_VALUE - repeated
+         *  - COLLECTING_BODY
+         */
+        public enum State {
+            BEGIN,
+            METHOD,
+            URI,
+            VERSION,
+            HTTP2_PREFACE,
+            HEADER_KEY,
+            HEADER_VALUE,
             COLLECTING_BODY,
-            START
         }
 
         // This is null, unless the Data has been reset and is moved into the
@@ -484,7 +504,7 @@ public final class Dispatcher implements Runnable {
         /**
          * Current state of the parsing process.
          */
-        private State state = State.START;
+        private State state = State.BEGIN;
 
         /**
          * Create a new instance
@@ -499,7 +519,7 @@ public final class Dispatcher implements Runnable {
         public void close() {
             headers = null;
             dataLength = 0;
-            state = State.START;
+            state = State.BEGIN;
             method = null;
             path = null;
             version = null;
@@ -581,6 +601,33 @@ public final class Dispatcher implements Runnable {
                 data.next = idleRequestData;
                 idleRequestData = data;
             }
+        }
+
+        public String getMethod() {
+            return method;
+        }
+
+        public void setMethod(String method) {
+            this.method = method;
+            System.out.println("method = " + method);
+        }
+
+        public String getPath() {
+            return path;
+        }
+
+        public void setPath(String path) {
+            this.path = path;
+            System.out.println("path = " + path);
+        }
+
+        public String getVersion() {
+            return version;
+        }
+
+        public void setVersion(String version) {
+            this.version = version;
+            System.out.println("version = " + version);
         }
     }
 }

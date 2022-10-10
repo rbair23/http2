@@ -3,6 +3,7 @@ package com.hedera.hashgraph.web.impl;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
+import java.nio.charset.Charset;
 import java.util.Arrays;
 
 /**
@@ -131,10 +132,23 @@ public final class HttpInputStream {
     /**
      * Clears the mark. Method is idempotent. Resets the current position in the stream to the marked
      * location.
+     *
+     * @return the number of bytes between current read position and last marked position
      */
-    public void clearMark() {
+    public int clearMark() {
+        final int numMarkedBytes = this.readPosition - this.markedPosition;
         this.readPosition = this.markedPosition;
         this.markedPosition = -1;
+        return numMarkedBytes;
+    }
+
+    /**
+     * Get the number of bytes between current read position and mark position
+     *
+     * @return the number of bytes between current read position and last marked position
+     */
+    public int getNumMarkedBytes() {
+        return this.readPosition - this.markedPosition;
     }
 
     /**
@@ -228,6 +242,39 @@ public final class HttpInputStream {
 
         assertAvailable(numBytes);
         System.arraycopy(buffer, this.readPosition, dst, dstOffset, numBytes);
+    }
+
+    /**
+     * Reads {@code numBytes} bytes from the stream into a new String. The stream's read position is advanced
+     * irrevocably.
+     *
+     * @param numBytes The number of bytes to read from the underlying stream
+     * @param charset The character set to use to decode bytes to string, for example StandardCharsets.US_ASCII
+     * @return new String containing read bytes converted to string using given character set for decoding
+     * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
+     */
+    public String readString(int numBytes, Charset charset) {
+        final String string = peekString(numBytes, charset);
+        this.readPosition += numBytes;
+        return string;
+    }
+
+    /**
+     * Gets {@code numBytes} bytes from the stream and puts them into a new String <strong>without</strong> moving
+     * the read position. This method is idempotent.
+     *
+     * @param numBytes The number of bytes to read from the underlying stream
+     * @param charset The character set to use to decode bytes to string, for example StandardCharsets.US_ASCII
+     * @return new String containing read bytes converted to string using given character set for decoding
+     * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
+     */
+    public String peekString(int numBytes, Charset charset) {
+        if (numBytes <= 0) {
+            return "";
+        }
+
+        assertAvailable(numBytes);
+        return new String(buffer, this.readPosition, numBytes, charset);
     }
 
     /**
