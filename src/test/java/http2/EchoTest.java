@@ -1,5 +1,6 @@
 package http2;
 
+import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.WebServer;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
@@ -11,10 +12,30 @@ import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.Collections;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
+
 class EchoTest {
     @Test
-    void echo() throws IOException, URISyntaxException, InterruptedException {
+    void echo() throws IOException {
         WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
+        server.getRoutes().get("/echo", req -> {
+            assertEquals("GET", req.getMethod());
+            assertEquals("HTTP/2.0", req.getProtocol());
+            assertEquals("/echo", req.getPath());
+
+            final var responseBody = "Hello World!";
+            final var responseHeaders = new WebHeaders()
+                    .setContentLength(responseBody.length())
+                    .setContentEncoding(WebHeaders.CONTENT_ENCODING_GZIP)
+                    .setServer("EchoTest");
+
+            try (var out = req.startResponse(responseHeaders, 200)) {
+                out.write(responseBody.getBytes());
+            } catch (IOException io) {
+                fail(io);
+            }
+        });
         server.start();
 
         final var port = server.getBoundAddress().getPort();

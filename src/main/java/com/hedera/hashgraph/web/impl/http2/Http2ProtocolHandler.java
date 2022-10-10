@@ -28,6 +28,7 @@ public class Http2ProtocolHandler implements ProtocolHandler {
     private static final int START = 0;
     private static final int AWAITING_SETTINGS = 1;
     private static final int AWAITING_FRAME = 2;
+    private static final int READY_FOR_DISPATCH = 3;
 
     private final Settings clientSettings = new Settings();
     private final Settings serverSettings = new Settings();
@@ -72,7 +73,7 @@ public class Http2ProtocolHandler implements ProtocolHandler {
                             needMoreData = true;
                         }
                     }
-                    default -> {
+                    case AWAITING_FRAME -> {
                         if (in.available(3)) {
                             int length = in.peek24BitInteger();
                             if (in.available(FRAME_HEADER_SIZE + length)) {
@@ -83,6 +84,10 @@ public class Http2ProtocolHandler implements ProtocolHandler {
                         } else {
                             needMoreData = true;
                         }
+                    }
+                    case READY_FOR_DISPATCH -> {
+                        // Go forth and handle. Good luck.
+                        doDispatch.accept(data, requestData);
                     }
                 }
             }
@@ -103,17 +108,22 @@ public class Http2ProtocolHandler implements ProtocolHandler {
 
     @Override
     public void handleError(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData, RuntimeException ex) {
-
+        // Who knows what happened? I got some random runtime exception, so it is a 500 class error
+        // that needs to be returned.
     }
 
     @Override
     public void endOfRequest(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData) {
-
+        // Request has finished, and the output stream data is sitting now in reqData buffer (??)
+        // and we need to start writing stuff? Not really, I should have somehow made an output stream
+        // available to the reqData, so the user could write bytes, and those bytes need to be captured
+        // and returned as Data/Continuation frames *WHILE* it is being handled, with a final "cleanup"
+        // frame sent at the end. So need to think that through.
     }
 
     @Override
     public void handleNoHandlerError(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData) {
-
+        // Uh.... 404?
     }
 
     // TODO Spec says this. How to enforce it for all frames? It seems dangerous to check it each and every method

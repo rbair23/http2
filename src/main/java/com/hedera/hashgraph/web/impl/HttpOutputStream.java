@@ -12,7 +12,7 @@ public class HttpOutputStream {
     public HttpOutputStream() {
     }
 
-    void reset(SocketChannel channel) {
+    void reset() {
 //        this.out = Objects.requireNonNull(out);
     }
 

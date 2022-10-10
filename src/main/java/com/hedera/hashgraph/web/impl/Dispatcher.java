@@ -7,6 +7,7 @@ import com.hedera.hashgraph.web.impl.http.HttpProtocolHandler;
 import com.hedera.hashgraph.web.impl.http2.Http2ProtocolHandler;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.channels.SocketChannel;
 import java.time.Duration;
 import java.util.HashMap;
@@ -187,7 +188,8 @@ public final class Dispatcher implements Runnable {
             final var handler = routes.match(method, path);
             if (handler != null) {
                 threadPool.submit(() -> {
-                    try(var request = new WebRequestImpl(method, path, reqData.version, reqData.headers)) {
+                    try(var request = new WebRequestImpl(method, path, reqData.version, reqData.version, reqData.headers)) {
+                        // The stupid web request impl has to somehow do the right thing...
                         handler.handle(request);
                     } catch (RuntimeException ex) {
                         // Oh dang, some exception happened while handling the request. Oof. Well, somebody
@@ -320,7 +322,7 @@ public final class Dispatcher implements Runnable {
             closed = false;
             this.channel = Objects.requireNonNull(channel);
             this.protocolHandler = httpProtocolHandler;
-            this.out.reset(this.channel);
+            this.out.reset();
         }
 
         @Override
@@ -336,7 +338,7 @@ public final class Dispatcher implements Runnable {
 
                 this.channel = null;
                 this.in.reset();
-                this.out.reset(null);
+                this.out.reset();
                 this.protocolHandler = httpProtocolHandler;
                 if (this.singleStreamData != null) {
                     this.singleStreamData.close();
@@ -482,6 +484,13 @@ public final class Dispatcher implements Runnable {
          * Parsed from the input stream by the {@link ProtocolHandler} and set here.
          */
         private String version;
+
+        /**
+         * This output stream instance is created by the {@link ProtocolHandler} and set here,
+         * to be used by the user's handler code to respond with content to queries. How those
+         * responses are buffered up and returned to the client are protocol specific.
+         */
+        private OutputStream out;
 
         /**
          * Current state of the parsing process.

@@ -14,7 +14,7 @@ import java.util.Objects;
  *
  * // TODO Turn into a record, this is not reused.
  */
-public record WebRequestImpl(String method, String path, String version, WebHeaders requestHeaders) implements WebRequest {
+public record WebRequestImpl(String method, String path, String version, String protocol, WebHeaders requestHeaders) implements WebRequest {
     public WebRequestImpl {
         Objects.requireNonNull(method);
         Objects.requireNonNull(path);
@@ -23,32 +23,23 @@ public record WebRequestImpl(String method, String path, String version, WebHead
     }
 
     @Override
-    public void close() {
-
-    }
-
-    @Override
     public WebHeaders getRequestHeaders() {
         return requestHeaders;
     }
 
-    void reset() {
-
-    }
-
     @Override
-    public WebHeaders getResponseHeaders() {
-        return null;
+    public String getMethod() {
+        return method;
     }
 
     @Override
     public String getPath() {
-        return null;
+        return path;
     }
 
     @Override
-    public String getRequestMethod() {
-        return null;
+    public String getProtocol() {
+        return protocol;
     }
 
     @Override
@@ -57,22 +48,17 @@ public record WebRequestImpl(String method, String path, String version, WebHead
     }
 
     @Override
-    public OutputStream getResponseBody() {
+    public void respond(WebHeaders responseHeaders, int responseCode) throws IOException {
+
+    }
+
+    @Override
+    public OutputStream startResponse(WebHeaders responseHeaders, int responseCode) throws IOException {
         return null;
     }
 
     @Override
-    public void sendResponseHeaders(int rCode, long responseLength) throws IOException {
+    public void close() {
 
-    }
-
-    @Override
-    public int getResponseCode() {
-        return 0;
-    }
-
-    @Override
-    public String getProtocol() {
-        return null;
     }
 }
