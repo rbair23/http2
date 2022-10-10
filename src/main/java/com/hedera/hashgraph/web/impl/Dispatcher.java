@@ -320,6 +320,7 @@ public final class Dispatcher implements Runnable {
             closed = false;
             this.channel = Objects.requireNonNull(channel);
             this.protocolHandler = httpProtocolHandler;
+            this.out.reset(this.channel);
         }
 
         @Override
@@ -335,7 +336,7 @@ public final class Dispatcher implements Runnable {
 
                 this.channel = null;
                 this.in.reset();
-                this.out.reset();
+                this.out.reset(null);
                 this.protocolHandler = httpProtocolHandler;
                 if (this.singleStreamData != null) {
                     this.singleStreamData.close();
@@ -441,25 +442,6 @@ public final class Dispatcher implements Runnable {
      */
     public final class RequestData implements AutoCloseable {
 
-        /**
-         * Enum for parse states of a HTTP Request
-         *
-         *  - BEGIN - before the start of file
-         *  - METHOD URI VERSION HTTP2_PREFACE? - Start file
-         *  - HEADER_KEY HEADER_VALUE - repeated
-         *  - COLLECTING_BODY
-         */
-        public enum State {
-            BEGIN,
-            METHOD,
-            URI,
-            VERSION,
-            HTTP2_PREFACE,
-            HEADER_KEY,
-            HEADER_VALUE,
-            COLLECTING_BODY,
-        }
-
         // This is null, unless the Data has been reset and is moved into the
         // "unused" queue. Then it will point to the next data in the queue.
         // The queue is a singly-linked list, where instances put back into the queue
@@ -504,7 +486,7 @@ public final class Dispatcher implements Runnable {
         /**
          * Current state of the parsing process.
          */
-        private State state = State.BEGIN;
+        private int stateFlags = 0;
 
         /**
          * Create a new instance
@@ -519,7 +501,7 @@ public final class Dispatcher implements Runnable {
         public void close() {
             headers = null;
             dataLength = 0;
-            state = State.BEGIN;
+            stateFlags = 0;
             method = null;
             path = null;
             version = null;
@@ -531,8 +513,8 @@ public final class Dispatcher implements Runnable {
          *
          * @return the state. Not null.
          */
-        public State getState() {
-            return state;
+        public int getState() {
+            return stateFlags;
         }
 
         /**
@@ -540,8 +522,8 @@ public final class Dispatcher implements Runnable {
          *
          * @param state the state to set, cannot be null.
          */
-        public void setState(State state) {
-            this.state = Objects.requireNonNull(state);
+        public void setState(int state) {
+            this.stateFlags = state;
         }
 
         /**

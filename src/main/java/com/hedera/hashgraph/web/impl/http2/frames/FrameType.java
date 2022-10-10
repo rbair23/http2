@@ -1,7 +1,10 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
-// The ordinals on these exactly align with the flags sent on the wire
-public enum FrameTypes {
+/**
+ * The type of frame. The ordinal values of these enums exactly align with the frame type flags
+ * on the wire.
+ */
+public enum FrameType {
     DATA,
     HEADERS,
     PRIORITY,
@@ -13,7 +16,14 @@ public enum FrameTypes {
     WINDOW_UPDATE,
     CONTINUATION;
 
-    public static FrameTypes fromOrdinal(int ordinal) {
+    /**
+     * A convenience function for getting the enum value based on the ordinal.
+     *
+     * @param ordinal The ordinal value.
+     * @return The enum value with the matching ordinal
+     * @throws IllegalArgumentException if the ordinal is not a valid value
+     */
+    public static FrameType valueOf(int ordinal) {
         return switch (ordinal) {
             case 0 -> DATA;
             case 1 -> HEADERS;
@@ -25,7 +35,7 @@ public enum FrameTypes {
             case 7 -> GO_AWAY;
             case 8 -> WINDOW_UPDATE;
             case 9 -> CONTINUATION;
-            default -> throw new IllegalArgumentException("Unknown ordinal " + ordinal);
+            default -> throw new IllegalArgumentException("Unknown type " + ordinal);
         };
     }
 }

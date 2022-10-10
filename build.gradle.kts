@@ -1,5 +1,6 @@
 plugins {
     id("java")
+    id("de.jjohannes.extra-java-module-info") version "0.15"
 }
 
 group = "org.example"
@@ -19,4 +20,9 @@ dependencies {
 
 tasks.getByName<Test>("test") {
     useJUnitPlatform()
+}
+
+extraJavaModuleInfo {
+    automaticModule("com.twitter:hpack", "com.twitter.hpack")
+    failOnMissingModuleInfo.set(false)
 }

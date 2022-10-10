@@ -122,7 +122,7 @@ public final class HttpInputStream {
     }
 
     /**
-     * Sets the mark position to the current position in the stream. {@link #clearMark()} will reset
+     * Sets the mark position to the current position in the stream. {@link #resetToMark()} will reset
      * the stream position to the mark.
      */
     public void mark() {
@@ -135,7 +135,7 @@ public final class HttpInputStream {
      *
      * @return the number of bytes between current read position and last marked position
      */
-    public int clearMark() {
+    public int resetToMark() {
         final int numMarkedBytes = this.readPosition - this.markedPosition;
         this.readPosition = this.markedPosition;
         this.markedPosition = -1;
@@ -365,10 +365,10 @@ public final class HttpInputStream {
     }
 
     /**
-     * Reads an unsigned 31-bit integer from the stream by reading 32 bits.
+     * Reads a signed 32-bit integer from the stream by reading 32 bits.
      * The stream's read position is advanced irrevocably.
      *
-     * @return An unsigned 31-bit integer
+     * @return A signed 32-bit integer
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public int read32BitInteger() {
@@ -378,15 +378,44 @@ public final class HttpInputStream {
     }
 
     /**
-     * Gets an unsigned 31-bit integer from the stream <strong>without</strong> moving the read position by reading
+     * Gets a signed 32-bit integer from the stream <strong>without</strong> moving the read position by reading
      * 32 bits. This method is idempotent.
      *
-     * @return An unsigned 32-bit integer
+     * @return A signed 32-bit integer
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public int peek32BitInteger() {
         assertAvailable(4);
         int result = buffer[readPosition] << 24;
+        result |= buffer[readPosition + 1] << 16;
+        result |= buffer[readPosition + 2] << 8;
+        result |= buffer[readPosition + 3];
+        return result;
+    }
+
+    /**
+     * Reads an unsigned 32-bit integer from the stream by reading 32 bits.
+     * The stream's read position is advanced irrevocably.
+     *
+     * @return An unsigned 32-bit integer
+     * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
+     */
+    public long read32BitUnsignedInteger() {
+        final var i = peek32BitUnsignedInteger();
+        this.readPosition += 4;
+        return i;
+    }
+
+    /**
+     * Gets an unsigned 32-bit integer from the stream <strong>without</strong> moving the read position by reading
+     * 32 bits. This method is idempotent.
+     *
+     * @return An unsigned 32-bit integer
+     * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
+     */
+    public long peek32BitUnsignedInteger() {
+        assertAvailable(4);
+        long result = buffer[readPosition] << 24;
         result |= buffer[readPosition + 1] << 16;
         result |= buffer[readPosition + 2] << 8;
         result |= buffer[readPosition + 3];

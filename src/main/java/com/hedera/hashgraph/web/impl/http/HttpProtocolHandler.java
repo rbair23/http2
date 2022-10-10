@@ -18,8 +18,18 @@ public class HttpProtocolHandler implements ProtocolHandler {
     private static final char CR = '\r';
     private static final char LF = '\n';
     private static final char SPACE = ' ';
-    /** The last bit of HTTP2 prefernece after "PRI * HTTP/2.0" */
+    /** The last bit of HTTP2 preface after "PRI * HTTP/2.0" */
     private static final byte[] HTTP2_PREFACE_END = "\r\nSM\r\n\r\n".getBytes();
+
+    public static final int BEGIN = 0;
+    public static final int METHOD = 1;
+    public static final int URI = 2;
+    public static final int VERSION = 3;
+    public static final int HTTP2_PREFACE = 4;
+    public static final int HEADER_KEY = 5;
+    public static final int HEADER_VALUE = 6;
+    public static final int COLLECTING_BODY = 7;
+
     private final WebRoutes routes;
     private final Http2ProtocolHandler http2ProtocolHandler;
 
@@ -43,36 +53,36 @@ public class HttpProtocolHandler implements ProtocolHandler {
             switch (requestData.getState()) {
                 case BEGIN:
                     in.mark();
-                    requestData.setState(Dispatcher.RequestData.State.METHOD);
+                    requestData.setState(METHOD);
                     break;
                 case METHOD:
                     if (searchForSpace(in, MAX_METHOD_LENGTH)) {
                         // we found a space, so read between mark and current position as string
-                        final int bytesRead = in.clearMark();
+                        final int bytesRead = in.resetToMark();
                         requestData.setMethod(in.readString(bytesRead, StandardCharsets.US_ASCII));
                         // skip over the space
                         in.skip(1);
                         // next state
                         in.mark();
-                        requestData.setState(Dispatcher.RequestData.State.URI);
+                        requestData.setState(URI);
                     }
                     break;
                 case URI:
                     if (searchForSpace(in, MAX_URI_LENGTH)) {
                         // we found a space, so read between mark and current position as string
-                        final int bytesRead = in.clearMark();
+                        final int bytesRead = in.resetToMark();
                         requestData.setPath(in.readString(bytesRead, StandardCharsets.US_ASCII));
                         // skip over the space
                         in.skip(1);
                         // next state
                         in.mark();
-                        requestData.setState(Dispatcher.RequestData.State.VERSION);
+                        requestData.setState(VERSION);
                     }
                     break;
                 case VERSION:
                     if (searchForEndOfLine(channelData, in, MAX_VERSION_LENGTH)) {
                         // we found a space, so read between mark and current position as string
-                        final int bytesRead = in.clearMark();
+                        final int bytesRead = in.resetToMark();
                         final String versionString = in.readString(bytesRead, StandardCharsets.US_ASCII);
                         requestData.setVersion(versionString);
                         // skip over the new line
@@ -83,12 +93,12 @@ public class HttpProtocolHandler implements ProtocolHandler {
                             case "HTTP/1.1":
                                 // next state
                                 in.mark();
-                                requestData.setState(Dispatcher.RequestData.State.HEADER_KEY);
+                                requestData.setState(HEADER_KEY);
                                 break;
                             case "HTTP/2.0":
                                 // next state
                                 in.mark();
-                                requestData.setState(Dispatcher.RequestData.State.HTTP2_PREFACE);
+                                requestData.setState(HTTP2_PREFACE);
                                 break;
                             default:
                                 sendErrorCodeResponse(channelData, StatusCode.HTTP_VERSION_NOT_SUPPORTED);
@@ -105,6 +115,7 @@ public class HttpProtocolHandler implements ProtocolHandler {
                             }
                         }
                         // full preface read, now hand over to http 2 handler
+                        requestData.setState(0);
                         channelData.setProtocolHandler(http2ProtocolHandler);
                         return;
                     }
@@ -176,7 +187,7 @@ public class HttpProtocolHandler implements ProtocolHandler {
 //                    in.skip(2);
 //                    // move to next state, handling the headers
 //                    in.mark();
-//                    channelData.getSingleStreamData().setState(Dispatcher.RequestData.State.COLLECTING_HEADERS);
+//                    channelData.getSingleStreamData().setState(COLLECTING_HEADERS);
 //                    break searchLoop;
 //                } else {
 //                    sendErrorCodeResponse(channelData, StatusCode.BAD_REQUEST);
