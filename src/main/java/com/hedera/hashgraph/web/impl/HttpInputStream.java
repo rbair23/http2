@@ -94,9 +94,10 @@ public final class HttpInputStream {
      * accordingly.
      *
      * @param channel The channel from which to read data. Must not be null.
+     * @return Whether there is additional data to be read that we didn't get to
      * @throws IOException If the channel is unable to be read.
      */
-    void addData(SocketChannel channel) throws IOException {
+    boolean addData(SocketChannel channel) throws IOException {
         assert channel != null : "The dispatcher should never have been able to call this with null for the channel";
 
         // If the buffer is already full, we need to shift
@@ -110,6 +111,10 @@ public final class HttpInputStream {
             // We read something, so that is good. Update the endPosition
             endPosition += numReadBytes;
         }
+
+        // If these are equal, then our buffer is full, and there **may** be data left in the channel
+        // that we should select later.
+        return endPosition == buffer.length;
     }
 
     /**

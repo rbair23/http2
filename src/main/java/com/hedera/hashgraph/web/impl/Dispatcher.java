@@ -4,8 +4,8 @@ import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.WebRequest;
 import com.hedera.hashgraph.web.WebRoutes;
 import com.hedera.hashgraph.web.WebServerConfig;
-import com.hedera.hashgraph.web.impl.http.HttpProtocolHandler;
-import com.hedera.hashgraph.web.impl.http2.Http2ProtocolHandler;
+import com.hedera.hashgraph.web.impl.http.HttpProtocol;
+import com.hedera.hashgraph.web.impl.http2.Http2Protocol;
 
 import java.io.IOException;
 import java.nio.channels.SocketChannel;
@@ -13,13 +13,14 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * The {@code Dispatcher} coordinates the work of the {@link ChannelManager} (which handles all networking
- * connections with the clients), the {@link ProtocolHandler}s, and the data buffers used by the protocol
+ * connections with the clients), the {@link ProtocolBase}s, and the data buffers used by the protocol
  * handlers. It also manages the {@link ExecutorService} (or thread pool) to which
  * {@link WebRequest}s are sent. There is a single instance of this class per
  * running {@link com.hedera.hashgraph.web.WebServer}, and it executes on a single thread.
@@ -27,7 +28,7 @@ import java.util.function.Consumer;
 public final class Dispatcher implements Runnable {
     /**
      * The time we want to allow the {@link ChannelManager} to block waiting for connections
-     * in {@link ChannelManager#checkConnections(Duration, AtomicInteger, Consumer)}, before giving up if all
+     * in {@link ChannelManager#checkConnections(Duration, AtomicInteger, Predicate)}, before giving up if all
      * connections are idle. This is low enough so when a server is stopped, it stops relatively
      * quickly, but long enough to keep us from a horrible busy loop consuming the CPU needlessly.
      */
@@ -61,14 +62,14 @@ public final class Dispatcher implements Runnable {
     private final ExecutorService threadPool;
 
     /**
-     * The single, stateless {@link ProtocolHandler} for the HTTP/1.0 and HTTP/1.1 protocols. This will never be null.
+     * The single, stateless {@link ProtocolBase} for the HTTP/1.0 and HTTP/1.1 protocols. This will never be null.
      */
-    private final HttpProtocolHandler httpProtocolHandler;
+    private final HttpProtocol httpProtocol;
 
     /**
-     * The single, stateless {@link Http2ProtocolHandler} for the HTTP/2.0 protocol. This will never be null.
+     * The single, stateless {@link Http2Protocol} for the HTTP/2.0 protocol. This will never be null.
      */
-    private final Http2ProtocolHandler http2ProtocolHandler;
+    private final Http2Protocol http2Protocol;
 
     /**
      * The number of additional connections that can be made. There is a configurable upper limit.
@@ -92,6 +93,8 @@ public final class Dispatcher implements Runnable {
      */
     private RequestData idleRequestData = null;
 
+    private ConcurrentLinkedDeque<OutputDataReady> outputDataQueue = new ConcurrentLinkedDeque<>();
+
     /**
      * Create a new instance. This instance can <b>NOT</b> be safely called from other threads,
      * except for the {@link #shutdown()} method.
@@ -110,8 +113,8 @@ public final class Dispatcher implements Runnable {
         this.routes = Objects.requireNonNull(routes);
         this.threadPool = Objects.requireNonNull(threadPool);
         this.channelManager = Objects.requireNonNull(channelManager);
-        this.http2ProtocolHandler = new Http2ProtocolHandler(routes);
-        this.httpProtocolHandler = new HttpProtocolHandler(routes, http2ProtocolHandler);
+        this.http2Protocol = new Http2Protocol();
+        this.httpProtocol = new HttpProtocol(http2Protocol);
         this.availableConnections = new AtomicInteger(config.maxIdleConnections());
     }
 
@@ -139,34 +142,41 @@ public final class Dispatcher implements Runnable {
                             data = checkoutChannelData(channel);
                             key.attach(data);
                         }
-
+                        
+                        boolean allDataRead = false;
                         try {
                             // Put the data into the input stream
-                            data.in.addData(data.channel);
-
-                            // Delegate to the protocol handler!
-                            data.protocolHandler.handle(data, this::dispatch);
+                            allDataRead = !data.in.addData(data.channel);
                         } catch (IOException e) {
                             // The dang channel is closed, we need to clean things up
                             e.printStackTrace();
-//                            data.close();
+                            data.close();
                         }
 
-                        try {
-                            // Try to flush any pending data
-                            if (data.channel != null) {
-                                data.out.flush(data.channel);
+                        // Delegate to the protocol handler!
+                        data.protocol.handle(data, this::dispatch);
+
+                        OutputDataReady ready;
+                        while ((ready = outputDataQueue.poll()) != null) {
+                            try {
+                                ready.channelData.protocol.flush(ready.channelData, ready.reqReadyWithData);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                                data.close();
                             }
-                        } catch (IOException e) {
-                            e.printStackTrace();
-//                            data.close();
                         }
+                        
+                        return allDataRead;
                     }
+
+                    return true;
                 });
+
+
             }
         } catch (IOException fatal) {
             // A fatal IOException has happened. This will stop the web server. We need to publish this
-            // quite loudly. I don't yet have any logging strategy in this code (OOOPS), so for now I
+            // quite loudly. I don't yet have any logging strategy in this code (OOPS), so for now I
             // am just going to have to do system.err.
             System.err.println("WEBSERVER - FATAL. Underlying socket has probably been closed on us");
             fatal.printStackTrace();
@@ -204,15 +214,15 @@ public final class Dispatcher implements Runnable {
                     } catch (RuntimeException ex) {
                         // Oh dang, some exception happened while handling the request. Oof. Well, somebody
                         // needs to send a 500 error.
-                        channelData.protocolHandler.onServerError(channelData, webRequest, ex);
+                        channelData.protocol.onServerError(channelData, webRequest, ex);
                     } finally {
                         // We finished this thing, one way or another
-                        channelData.protocolHandler.onEndOfRequest(channelData, webRequest);
+                        channelData.protocol.onEndOfRequest(channelData, webRequest);
                     }
                 });
             } else {
                 // Dude, 404
-                channelData.protocolHandler.on404(channelData, webRequest);
+                channelData.protocol.on404(channelData, webRequest);
             }
         }
     }
@@ -250,8 +260,8 @@ public final class Dispatcher implements Runnable {
      * <p>
      * Each channel has associated with it two streams -- an input stream from which bytes on the channel are
      * made available, and an output stream into which bytes are to be sent to the client though the channel.
-     * Each channel also has a single associated {@link ProtocolHandler}. All channels start of with the
-     * {@link HttpProtocolHandler}, but may be upgraded to use an {@link Http2ProtocolHandler} if the original
+     * Each channel also has a single associated {@link ProtocolBase}. All channels start of with the
+     * {@link HttpProtocol}, but may be upgraded to use an {@link Http2Protocol} if the original
      * protocol detects it. When the channel data object is closed, it goes back to using the HTTP protocol handler.
      * <p>
      * There is some ugliness here because we have two ways of using {@link RequestData} here. For HTTP 1.0 and
@@ -284,11 +294,11 @@ public final class Dispatcher implements Runnable {
 
         /**
          * The protocol handler associated with this {@link ChannelData} instance. This always starts
-         * off pointing to a {@link HttpProtocolHandler}, but can be upgraded to {@link Http2ProtocolHandler}.
+         * off pointing to a {@link HttpProtocol}, but can be upgraded to {@link Http2Protocol}.
          * Whichever instance is here, is used for handling all requests on this channel. For example,
          * upgrading to HTTP/2.0 is a one-way operation, the channel will only deal with HTTP/2.0 going forward.
          */
-        private ProtocolHandler protocolHandler;
+        private ProtocolBase protocol;
 
         /**
          * The underlying {@link SocketChannel} that we use for reading and writing data.
@@ -317,7 +327,7 @@ public final class Dispatcher implements Runnable {
          * Create a new instance.
          */
         public ChannelData() {
-            this.protocolHandler = httpProtocolHandler;
+            this.protocol = httpProtocol;
             this.in = new HttpInputStream(config.maxRequestSize());
             this.out = new HttpOutputStream();
             this.closed = false;
@@ -331,7 +341,7 @@ public final class Dispatcher implements Runnable {
         void reset(SocketChannel channel) {
             closed = false;
             this.channel = Objects.requireNonNull(channel);
-            this.protocolHandler = httpProtocolHandler;
+            this.protocol = httpProtocol;
             this.out.reset();
         }
 
@@ -355,7 +365,7 @@ public final class Dispatcher implements Runnable {
                 this.channel = null;
                 this.in.reset();
                 this.out.reset();
-                this.protocolHandler = httpProtocolHandler;
+                this.protocol = httpProtocol;
                 if (this.singleStreamData != null) {
                     this.singleStreamData.close();
                 }
@@ -396,14 +406,14 @@ public final class Dispatcher implements Runnable {
          *
          * @return
          */
-        public ProtocolHandler getProtocolHandler() {
+        public ProtocolBase getProtocol() {
             // TODO Is this method really needed? Or can we just remove it?
-            return protocolHandler;
+            return protocol;
         }
 
         // TODO Maybe rename to "upgrade"?
-        public void setProtocolHandler(ProtocolHandler protocolHandler) {
-            this.protocolHandler = Objects.requireNonNull(protocolHandler);
+        public void setProtocol(ProtocolBase protocol) {
+            this.protocol = Objects.requireNonNull(protocol);
         }
 
         /**
@@ -455,7 +465,7 @@ public final class Dispatcher implements Runnable {
 
     /**
      * Contains all state need to parse and create a valid {@link WebRequest}.
-     * The values within this class are set based on logic in the {@link ProtocolHandler} on the
+     * The values within this class are set based on logic in the {@link ProtocolBase} on the
      * connection associated with this request.
      */
     public final class RequestData implements AutoCloseable {
@@ -468,12 +478,22 @@ public final class Dispatcher implements Runnable {
         private RequestData next;
 
         /**
-         * The data buffer. This is sized to be large enough to contain all headers, or all body, or an entire
-         * HTTP/2.0 frame (whichever is larger). Initially header info is written into it, and then we write
-         * over it with body info, and then eventually create an InputStream over the data for use in the
+         * The headers buffer. This is sized to be large enough to contain all headers, or an entire
+         * HTTP/2.0 frame (whichever is larger).
+         */
+        private final byte[] headersBuffer;
+
+        /**
+         * The data buffer. This is sized to be large enough to contain the entire request body, or an entire
+         * HTTP/2.0 frame (whichever is larger).Eventually create an InputStream over the data for use in the
          * {@link WebRequest}.
          */
         private final byte[] data;
+
+        /**
+         * The index into {@link #headersBuffer} where valid data ends.
+         */
+        private int headerLength;
 
         /**
          * The index into {@link #data} where valid data ends.
@@ -487,17 +507,17 @@ public final class Dispatcher implements Runnable {
         private WebHeaders headers; // This is garbage on each request, or maybe not?
 
         /**
-         * Parsed from the input stream by the {@link ProtocolHandler} and set here.
+         * Parsed from the input stream by the {@link ProtocolBase} and set here.
          */
         private String method;
 
         /**
-         * Parsed from the input stream by the {@link ProtocolHandler} and set here.
+         * Parsed from the input stream by the {@link ProtocolBase} and set here.
          */
         private String path;
 
         /**
-         * Parsed from the input stream by the {@link ProtocolHandler} and set here.
+         * Parsed from the input stream by the {@link ProtocolBase} and set here.
          */
         private String version;
 
@@ -523,6 +543,7 @@ public final class Dispatcher implements Runnable {
          */
         RequestData(int bufferSize) {
             this.data = new byte[bufferSize];
+            this.headersBuffer = new byte[bufferSize];
         }
 
         @Override
@@ -635,6 +656,14 @@ public final class Dispatcher implements Runnable {
             this.requestId = requestId;
         }
 
+        public String getTempString() {
+            return tempString;
+        }
+
+        public void setTempString(String tempString) {
+            this.tempString = tempString;
+        }
+
         /**
          * Returns the given {@link RequestData} to the idle set.
          * @param data The data, not null.
@@ -646,13 +675,10 @@ public final class Dispatcher implements Runnable {
                 idleRequestData = data;
             }
         }
+    }
 
-        public String getTempString() {
-            return tempString;
-        }
-
-        public void setTempString(String tempString) {
-            this.tempString = tempString;
-        }
+    private static final class OutputDataReady {
+        private ChannelData channelData;
+        private RequestData reqReadyWithData;
     }
 }

@@ -1,19 +1,18 @@
 package com.hedera.hashgraph.web.impl.http;
 
 import com.hedera.hashgraph.web.WebHeaders;
-import com.hedera.hashgraph.web.WebRequest;
 import com.hedera.hashgraph.web.WebRoutes;
 import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.impl.HttpInputStream;
-import com.hedera.hashgraph.web.impl.ProtocolHandler;
+import com.hedera.hashgraph.web.impl.ProtocolBase;
 import com.hedera.hashgraph.web.impl.WebRequestImpl;
-import com.hedera.hashgraph.web.impl.http2.Http2ProtocolHandler;
+import com.hedera.hashgraph.web.impl.http2.Http2Protocol;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 
-public class HttpProtocolHandler implements ProtocolHandler {
+public class HttpProtocol extends ProtocolBase {
     private static final int MAX_METHOD_LENGTH = 1024;
     private static final int MAX_URI_LENGTH = 2024;
     private static final int MAX_VERSION_LENGTH = 8;
@@ -36,11 +35,9 @@ public class HttpProtocolHandler implements ProtocolHandler {
     public static final int HEADER_VALUE = 6;
     public static final int COLLECTING_BODY = 7;
 
-    private final WebRoutes routes;
-    private final Http2ProtocolHandler http2ProtocolHandler;
+    private final Http2Protocol http2ProtocolHandler;
 
-    public HttpProtocolHandler(WebRoutes routes, Http2ProtocolHandler http2ProtocolHandler) {
-        this.routes = Objects.requireNonNull(routes);
+    public HttpProtocol(Http2Protocol http2ProtocolHandler) {
         this.http2ProtocolHandler = Objects.requireNonNull(http2ProtocolHandler);
     }
 
@@ -122,7 +119,7 @@ public class HttpProtocolHandler implements ProtocolHandler {
                         }
                         // full preface read, now hand over to http 2 handler
                         requestData.setState(0);
-                        channelData.setProtocolHandler(http2ProtocolHandler);
+                        channelData.setProtocol(http2ProtocolHandler);
                         return;
                     }
                     break;
@@ -200,6 +197,11 @@ public class HttpProtocolHandler implements ProtocolHandler {
     @Override
     public void on404(Dispatcher.ChannelData channelData, WebRequestImpl request) {
 
+    }
+
+    @Override
+    protected void flush(Dispatcher.ChannelData channelData, Dispatcher.RequestData requestData) {
+        // take data from the request data and write it to the output stream
     }
 
     private boolean searchForSpace(HttpInputStream in, int maxLengthToSearch) {

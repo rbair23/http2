@@ -17,7 +17,7 @@ import java.util.function.BiConsumer;
 
 // Right now, this is created per-thread. To be reused across threads, we have to do some kind of per-thread state,
 // such as for settings and request handlers.
-public class Http2ProtocolHandler implements ProtocolHandler {
+public class Http2Protocol extends ProtocolBase {
     private static final int FRAME_HEADER_SIZE = 9;
     private static final int CONNECTION_STREAM_ID = 0;
 
@@ -31,11 +31,7 @@ public class Http2ProtocolHandler implements ProtocolHandler {
     private final Settings clientSettings = new Settings();
     private final Settings serverSettings = new Settings();
 
-    private final Executor threadPool = Executors.newCachedThreadPool();
-    private final WebRoutes routes;
-
-    public Http2ProtocolHandler(WebRoutes routes) {
-        this.routes = Objects.requireNonNull(routes);
+    public Http2Protocol() {
         serverSettings.setMaxConcurrentStreams(10); // Spec recommends 100, at least. Maybe we can even do 1000 or something?
     }
 
@@ -159,6 +155,11 @@ public class Http2ProtocolHandler implements ProtocolHandler {
     @Override
     public void on404(Dispatcher.ChannelData channelData, WebRequestImpl request) {
         // Uh.... 404?
+    }
+
+    @Override
+    protected void flush(Dispatcher.ChannelData channelData, Dispatcher.RequestData requestData) {
+        // take data from the request data and write it to the output stream
     }
 
     // TODO Spec says this. How to enforce it for all frames? It seems dangerous to check it each and every method

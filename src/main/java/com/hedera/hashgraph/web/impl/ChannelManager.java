@@ -8,7 +8,7 @@ import java.nio.channels.ServerSocketChannel;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * Manages the set of all open connections on a single {@link ServerSocketChannel}.
@@ -60,7 +60,7 @@ public final class ChannelManager {
 
     /**
      * Threadsafe method to terminate any processing being done by this class and interrupt
-     * the {@link #checkConnections(Duration, Consumer)} method, if it is blocking.
+     * the {@link #checkConnections(Duration, AtomicInteger, Predicate)} method, if it is blocking.
      */
     public void shutdown() {
         this.shutdown = true;
@@ -93,7 +93,7 @@ public final class ChannelManager {
     public void checkConnections(
             final Duration timeout,
             final AtomicInteger availableConnectionCount,
-            final Consumer<SelectionKey> onRead) throws IOException {
+            final Predicate<SelectionKey> onRead) throws IOException {
         // TODO does the onRead need to tell me whether data was actually read or not? I think probably it does,
         //      otherwise I maybe shouldn't remove the key from the iterator...
 
@@ -126,8 +126,9 @@ public final class ChannelManager {
                 itr.remove();
                 accept();
             } else if (key.isReadable()) {
-                itr.remove();
-                onRead.accept(key);
+                if (onRead.test(key)) {
+                    itr.remove();
+                }
             }
         }
     }
