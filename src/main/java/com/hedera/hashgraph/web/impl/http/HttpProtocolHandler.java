@@ -175,7 +175,9 @@ public class HttpProtocolHandler implements ProtocolHandler {
                 case COLLECTING_BODY:
                     // TODO handle "Transfer-Encoding" eg "gzip, chunked"
                     // we have finished with body so dispatch
-                    doDispatch.accept(channelData,requestData);
+                    doDispatch.accept(channelData, new WebRequestImpl(requestData, (headers, responseCode) -> {
+
+                    }));
                     // set state back to beginning in case we have another HTTP 1.1 request
                     requestData.close();
                     return;
