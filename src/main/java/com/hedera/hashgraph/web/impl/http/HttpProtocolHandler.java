@@ -1,10 +1,12 @@
 package com.hedera.hashgraph.web.impl.http;
 
 import com.hedera.hashgraph.web.WebHeaders;
+import com.hedera.hashgraph.web.WebRequest;
 import com.hedera.hashgraph.web.WebRoutes;
 import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.impl.HttpInputStream;
 import com.hedera.hashgraph.web.impl.ProtocolHandler;
+import com.hedera.hashgraph.web.impl.WebRequestImpl;
 import com.hedera.hashgraph.web.impl.http2.Http2ProtocolHandler;
 
 import java.nio.charset.StandardCharsets;
@@ -43,7 +45,7 @@ public class HttpProtocolHandler implements ProtocolHandler {
     }
 
     @Override
-    public void handle(Dispatcher.ChannelData channelData, BiConsumer<Dispatcher.ChannelData, Dispatcher.RequestData> doDispatch) {
+    public void handle(Dispatcher.ChannelData channelData, BiConsumer<Dispatcher.ChannelData, WebRequestImpl> doDispatch) {
         final HttpInputStream in = channelData.getIn();
         final var requestData = channelData.getSingleStreamData();
         //         generic-message = start-line
@@ -184,17 +186,17 @@ public class HttpProtocolHandler implements ProtocolHandler {
     }
 
     @Override
-    public void handleError(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData, RuntimeException ex) {
+    public void onServerError(Dispatcher.ChannelData channelData, WebRequestImpl request, RuntimeException ex) {
 
     }
 
     @Override
-    public void endOfRequest(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData) {
+    public void onEndOfRequest(Dispatcher.ChannelData channelData, WebRequestImpl request) {
 
     }
 
     @Override
-    public void handleNoHandlerError(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData) {
+    public void on404(Dispatcher.ChannelData channelData, WebRequestImpl request) {
 
     }
 

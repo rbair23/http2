@@ -1,22 +1,18 @@
 package com.hedera.hashgraph.web.impl.http2;
 
+import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.WebRoutes;
-import com.hedera.hashgraph.web.impl.Dispatcher;
-import com.hedera.hashgraph.web.impl.HttpInputStream;
-import com.hedera.hashgraph.web.impl.HttpOutputStream;
-import com.hedera.hashgraph.web.impl.ProtocolHandler;
+import com.hedera.hashgraph.web.impl.*;
 import com.hedera.hashgraph.web.impl.http2.frames.*;
 import com.twitter.hpack.Decoder;
 import com.twitter.hpack.Encoder;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 
 // Right now, this is created per-thread. To be reused across threads, we have to do some kind of per-thread state,
@@ -42,20 +38,19 @@ public class Http2ProtocolHandler implements ProtocolHandler {
     }
 
     @Override
-    public void handle(Dispatcher.ChannelData data, BiConsumer<Dispatcher.ChannelData, Dispatcher.RequestData> doDispatch) {
+    public void handle(Dispatcher.ChannelData data, BiConsumer<Dispatcher.ChannelData, WebRequestImpl> doDispatch) {
         final var in = data.getIn();
         final var out = data.getOut();
         final var requestData = data.getRequestData();
 
         try {
-            var state = requestData.getState();
             var needMoreData = false;
             while (!needMoreData) {
-                switch (state) {
+                switch (requestData.getState()) {
                     case START ->  {
                         // Send MY settings to the client (including the max stream number)
                         SettingsFrame.write(out, serverSettings);
-                        state = AWAITING_SETTINGS;
+                        requestData.setState(AWAITING_SETTINGS);
                     }
                     case AWAITING_SETTINGS -> {
                         if (in.available(FRAME_HEADER_SIZE)) {
@@ -68,7 +63,7 @@ public class Http2ProtocolHandler implements ProtocolHandler {
                                 throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, CONNECTION_STREAM_ID);
                             }
 
-                            state = AWAITING_FRAME;
+                            requestData.setState(AWAITING_FRAME);
                         } else {
                             needMoreData = true;
                         }
@@ -87,12 +82,34 @@ public class Http2ProtocolHandler implements ProtocolHandler {
                     }
                     case READY_FOR_DISPATCH -> {
                         // Go forth and handle. Good luck.
-                        doDispatch.accept(data, requestData);
+                        final var requestHeaders = requestData.getHeaders();
+                        requestData.setPath(requestHeaders.get(":path"));
+                        requestData.setMethod(requestHeaders.get(":method"));
+                        requestData.setVersion("HTTP/2.0");
+                        final var webRequest = new WebRequestImpl(requestData, (headers, responseCode) -> {
+                            final var encoder = new Encoder((int) clientSettings.getHeaderTableSize());
+                            final var hos = new RequestDataOutputStream(requestData);
+                            encoder.encodeHeader(hos, ":status".getBytes(), ("" + responseCode).getBytes(), false);
+                            final AtomicReference<IOException> ioException = new AtomicReference<>();
+                            headers.forEach((k, v) -> {
+                                try {
+                                    encoder.encodeHeader(hos, k.getBytes(), v.getBytes(), false);
+                                } catch (IOException e) {
+                                    ioException.set(e);
+                                }
+                            });
+
+                            final var e = ioException.get();
+                            if (e != null) {
+                                throw e;
+                            } else {
+                                HeadersFrame.write(out, requestData.getRequestId(), requestData.getData(), 0, hos.getCount());
+                            }
+                        });
+                        doDispatch.accept(data, webRequest);
                     }
                 }
             }
-
-            requestData.setState(state);
         } catch (IOException e) {
             e.printStackTrace();
         } catch (Http2Exception e) {
@@ -107,22 +124,29 @@ public class Http2ProtocolHandler implements ProtocolHandler {
     }
 
     @Override
-    public void handleError(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData, RuntimeException ex) {
+    public void onServerError(Dispatcher.ChannelData channelData, WebRequestImpl request, RuntimeException ex) {
         // Who knows what happened? I got some random runtime exception, so it is a 500 class error
         // that needs to be returned.
     }
 
     @Override
-    public void endOfRequest(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData) {
-        // Request has finished, and the output stream data is sitting now in reqData buffer (??)
-        // and we need to start writing stuff? Not really, I should have somehow made an output stream
-        // available to the reqData, so the user could write bytes, and those bytes need to be captured
-        // and returned as Data/Continuation frames *WHILE* it is being handled, with a final "cleanup"
-        // frame sent at the end. So need to think that through.
+    public void onEndOfRequest(final Dispatcher.ChannelData channelData, final WebRequestImpl request) {
+        try {
+            // Create the DataFrame to send to the client using the data within the RequestData object
+            final var out = channelData.getOut();
+            final var requestData = request.getRequestData();
+            DataFrame.write(out, requestData.getRequestId(), true, requestData.getData(), 0, requestData.getDataLength());
+
+            // Close the stream.
+            RstStreamFrame.write(out, Http2ErrorCode.NO_ERROR, requestData.getRequestId());
+        } catch (IOException fatalToConnection) {
+            fatalToConnection.printStackTrace();
+            channelData.close();
+        }
     }
 
     @Override
-    public void handleNoHandlerError(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData) {
+    public void on404(Dispatcher.ChannelData channelData, WebRequestImpl request) {
         // Uh.... 404?
     }
 
@@ -152,7 +176,7 @@ public class Http2ProtocolHandler implements ProtocolHandler {
                 switch (type) {
                     case SETTINGS -> handleSettings(in, out, req);
                     case WINDOW_UPDATE -> handleWindowUpdate(in, out);
-                    case HEADERS -> handleHeaders(in, out);
+                    case HEADERS -> handleHeaders(in, out, req);
                     case RST_STREAM -> handleRstStream(in, out);
                     case PING -> handlePing(in, out);
                     // I don't know how to handle this one, so just skip it.
@@ -203,32 +227,26 @@ public class Http2ProtocolHandler implements ProtocolHandler {
         }
     }
 
-    private void handleHeaders(HttpInputStream in, HttpOutputStream out) throws IOException {
+    private void handleHeaders(HttpInputStream in, HttpOutputStream out, Dispatcher.RequestData requestData) throws IOException {
         final var headerFrame = HeadersFrame.parse(in);
+        requestData.setRequestId(headerFrame.getStreamId());
         if (headerFrame.isCompleteHeader()) {
             // I have all the bytes I will need... so I can go and decode them
             final var decoder = new Decoder(
                     (int) serverSettings.getMaxHeaderListSize(),
                     (int) serverSettings.getHeaderTableSize());
 
+            final var headers = new WebHeaders();
             decoder.decode(new ByteArrayInputStream(headerFrame.getFieldBlockFragment()), (name, value, sensitive) -> {
-                // name is a byte[]
-                // value is a byte[]
                 // sensitive is a boolean
-                System.out.println(new String(name) + " = " + new String(value));
+                headers.put(new String(name), new String(value));
             });
+            requestData.setHeaders(headers);
         }
 
         if (headerFrame.isEndStream()) {
-            // Time to send my response!
-            final var encoder = new Encoder((int) clientSettings.getHeaderTableSize());
-            final var ooo = new ByteArrayOutputStream(1024);
-            encoder.encodeHeader(ooo, ":status".getBytes(), "0".getBytes(), false);
-            HeadersFrame.write(out, headerFrame.getStreamId(), ooo.toByteArray());
-
-            DataFrame.write(out, headerFrame.getStreamId(), "Hello".getBytes());
+            requestData.setState(READY_FOR_DISPATCH);
         }
-        submitFrame(headerFrame, out);
     }
 
     private void submitFrame(Frame frame, HttpOutputStream out) {

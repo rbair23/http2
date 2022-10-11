@@ -6,11 +6,11 @@ import java.util.function.BiConsumer;
  * Implements a protocol, such as HTTP or HTTP/2. Responsible for reading bytes from a {@link HttpInputStream}.
  */
 public interface ProtocolHandler {
-    void handle(Dispatcher.ChannelData data, BiConsumer<Dispatcher.ChannelData, Dispatcher.RequestData> doDispatch);
+    void handle(Dispatcher.ChannelData data, BiConsumer<Dispatcher.ChannelData, WebRequestImpl> doDispatch);
 
-    void handleError(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData, RuntimeException ex);
+    void onServerError(Dispatcher.ChannelData channelData, WebRequestImpl request, RuntimeException ex);
 
-    void endOfRequest(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData);
+    void onEndOfRequest(Dispatcher.ChannelData channelData, WebRequestImpl request);
 
-    void handleNoHandlerError(Dispatcher.ChannelData channelData, Dispatcher.RequestData reqData);
+    void on404(Dispatcher.ChannelData channelData, WebRequestImpl request);
 }

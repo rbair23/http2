@@ -89,9 +89,13 @@ public final class DataFrame extends Frame {
         return new DataFrame(frameLength, flags, streamId, data);
     }
 
-    public static void write(HttpOutputStream out, int streamId, byte[] data) throws IOException {
-        Frame.writeHeader(out, data.length, FrameType.DATA, (byte) 0x1, streamId);
-        out.writeBytes(data, 0, data.length);
+    public static void write(HttpOutputStream out, int streamId, boolean last, byte[] data, int offset, int length) throws IOException {
+        Frame.writeHeader(out, data.length, FrameType.DATA, (byte) 0x0, streamId);
+        out.writeBytes(data, offset, length);
+
+        if (last) {
+            Frame.writeHeader(out, 0, FrameType.DATA, (byte) 0x1, streamId);
+        }
     }
 
 }

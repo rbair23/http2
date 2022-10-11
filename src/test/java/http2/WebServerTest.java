@@ -1,12 +1,8 @@
 package http2;
 
-import com.hedera.hashgraph.web.WebRequest;
-import com.hedera.hashgraph.web.WebRequestHandler;
 import com.hedera.hashgraph.web.WebServer;
 import com.hedera.hashgraph.web.WebServerConfig;
 import org.junit.jupiter.api.Test;
-
-import java.util.concurrent.Executors;
 
 public class WebServerTest {
     @Test

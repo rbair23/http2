@@ -1,13 +1,13 @@
 package com.hedera.hashgraph.web.impl;
 
 import com.hedera.hashgraph.web.WebHeaders;
+import com.hedera.hashgraph.web.WebRequest;
 import com.hedera.hashgraph.web.WebRoutes;
 import com.hedera.hashgraph.web.WebServerConfig;
 import com.hedera.hashgraph.web.impl.http.HttpProtocolHandler;
 import com.hedera.hashgraph.web.impl.http2.Http2ProtocolHandler;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.channels.SocketChannel;
 import java.time.Duration;
 import java.util.HashMap;
@@ -21,7 +21,7 @@ import java.util.function.Consumer;
  * The {@code Dispatcher} coordinates the work of the {@link ChannelManager} (which handles all networking
  * connections with the clients), the {@link ProtocolHandler}s, and the data buffers used by the protocol
  * handlers. It also manages the {@link ExecutorService} (or thread pool) to which
- * {@link com.hedera.hashgraph.web.WebRequest}s are sent. There is a single instance of this class per
+ * {@link WebRequest}s are sent. There is a single instance of this class per
  * running {@link com.hedera.hashgraph.web.WebServer}, and it executes on a single thread.
  */
 public final class Dispatcher implements Runnable {
@@ -177,32 +177,31 @@ public final class Dispatcher implements Runnable {
      * Called by the {@link #run()} method when there is a request ready to be handled.
      *
      * @param channelData The {@link ChannelData} instance associated with the request to dispatch. Not null or closed.
-     * @param reqData The {@link RequestData} instance with the request data to dispatch. Not null or closed.
+     * @param webRequest The {@link WebRequest} to dispatch. Not null or closed.
      */
-    private void dispatch(ChannelData channelData, RequestData reqData) {
+    private void dispatch(ChannelData channelData, WebRequestImpl webRequest) {
         if (!shutdown) {
             // This callback is invoked when it is time to submit the request.
             // Can I get method and path from the headers?
-            final var method = reqData.method;
-            final var path = reqData.path;
+            final var method = webRequest.getMethod();
+            final var path = webRequest.getPath();
             final var handler = routes.match(method, path);
             if (handler != null) {
                 threadPool.submit(() -> {
-                    try(var request = new WebRequestImpl(method, path, reqData.version, reqData.version, reqData.headers)) {
-                        // The stupid web request impl has to somehow do the right thing...
-                        handler.handle(request);
+                    try(webRequest) {
+                        handler.handle(webRequest);
                     } catch (RuntimeException ex) {
                         // Oh dang, some exception happened while handling the request. Oof. Well, somebody
                         // needs to send a 500 error.
-                        channelData.protocolHandler.handleError(channelData, reqData, ex);
+                        channelData.protocolHandler.onServerError(channelData, webRequest, ex);
                     } finally {
                         // We finished this thing, one way or another
-                        channelData.protocolHandler.endOfRequest(channelData, reqData);
+                        channelData.protocolHandler.onEndOfRequest(channelData, webRequest);
                     }
                 });
             } else {
                 // Dude, 404
-                channelData.protocolHandler.handleNoHandlerError(channelData, reqData);
+                channelData.protocolHandler.on404(channelData, webRequest);
             }
         }
     }
@@ -438,7 +437,7 @@ public final class Dispatcher implements Runnable {
     }
 
     /**
-     * Contains all state need to parse and create a valid {@link com.hedera.hashgraph.web.WebRequest}.
+     * Contains all state need to parse and create a valid {@link WebRequest}.
      * The values within this class are set based on logic in the {@link ProtocolHandler} on the
      * connection associated with this request.
      */
@@ -455,7 +454,7 @@ public final class Dispatcher implements Runnable {
          * The data buffer. This is sized to be large enough to contain all headers, or all body, or an entire
          * HTTP/2.0 frame (whichever is larger). Initially header info is written into it, and then we write
          * over it with body info, and then eventually create an InputStream over the data for use in the
-         * {@link com.hedera.hashgraph.web.WebRequest}.
+         * {@link WebRequest}.
          */
         private final byte[] data;
 
@@ -486,13 +485,6 @@ public final class Dispatcher implements Runnable {
         private String version;
 
         /**
-         * This output stream instance is created by the {@link ProtocolHandler} and set here,
-         * to be used by the user's handler code to respond with content to queries. How those
-         * responses are buffered up and returned to the client are protocol specific.
-         */
-        private OutputStream out;
-
-        /**
          * Current state of the parsing process.
          */
         private int stateFlags = 0;
@@ -501,6 +493,11 @@ public final class Dispatcher implements Runnable {
          * Temporary string used for storing partially parsed data
          */
         private String tempString;
+
+        /**
+         * The request ID. Used by HTTP2 for sure, maybe not by 1.0/1.1.
+         */
+        private int requestId;
 
         /**
          * Create a new instance
@@ -516,6 +513,7 @@ public final class Dispatcher implements Runnable {
             headers = null;
             dataLength = 0;
             stateFlags = 0;
+            requestId = 0;
             method = null;
             path = null;
             version = null;
@@ -588,6 +586,38 @@ public final class Dispatcher implements Runnable {
             this.headers = Objects.requireNonNull(headers);
         }
 
+        public String getMethod() {
+            return method;
+        }
+
+        public void setMethod(String method) {
+            this.method = method;
+        }
+
+        public String getPath() {
+            return path;
+        }
+
+        public void setPath(String path) {
+            this.path = path;
+        }
+
+        public String getVersion() {
+            return version;
+        }
+
+        public void setVersion(String version) {
+            this.version = version;
+        }
+
+        public int getRequestId() {
+            return requestId;
+        }
+
+        public void setRequestId(int requestId) {
+            this.requestId = requestId;
+        }
+
         /**
          * Returns the given {@link RequestData} to the idle set.
          * @param data The data, not null.
@@ -598,33 +628,6 @@ public final class Dispatcher implements Runnable {
                 data.next = idleRequestData;
                 idleRequestData = data;
             }
-        }
-
-        public String getMethod() {
-            return method;
-        }
-
-        public void setMethod(String method) {
-            this.method = method;
-            System.out.println("method = " + method);
-        }
-
-        public String getPath() {
-            return path;
-        }
-
-        public void setPath(String path) {
-            this.path = path;
-            System.out.println("path = " + path);
-        }
-
-        public String getVersion() {
-            return version;
-        }
-
-        public void setVersion(String version) {
-            this.version = version;
-            System.out.println("version = " + version);
         }
 
         public String getTempString() {

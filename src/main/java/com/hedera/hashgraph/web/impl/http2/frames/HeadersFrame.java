@@ -113,8 +113,8 @@ public final class HeadersFrame extends Frame {
         return new HeadersFrame(frameLength, flags, streamId, fieldBlockFragment);
     }
 
-    public static void write(HttpOutputStream out, int streamId, byte[] data) throws IOException {
+    public static void write(HttpOutputStream out, int streamId, byte[] data, int offset, int length) throws IOException {
         Frame.writeHeader(out, data.length, FrameType.HEADERS, (byte) 0x0, streamId);
-        out.writeBytes(data, 0, data.length);
+        out.writeBytes(data, offset, length);
     }
 }

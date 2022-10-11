@@ -65,7 +65,7 @@ public interface WebRequest extends AutoCloseable {
      *
      * @return the stream from which the request body can be read
      */
-    InputStream getRequestBody();
+    InputStream getRequestBody() throws IOException;
 
     /**
      * Responds to the request with the given response headers and code. There is no response body
