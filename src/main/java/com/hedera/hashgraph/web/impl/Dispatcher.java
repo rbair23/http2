@@ -148,7 +148,18 @@ public final class Dispatcher implements Runnable {
                             data.protocolHandler.handle(data, this::dispatch);
                         } catch (IOException e) {
                             // The dang channel is closed, we need to clean things up
-                            data.close();
+                            e.printStackTrace();
+//                            data.close();
+                        }
+
+                        try {
+                            // Try to flush any pending data
+                            if (data.channel != null) {
+                                data.out.flush(data.channel);
+                            }
+                        } catch (IOException e) {
+                            e.printStackTrace();
+//                            data.close();
                         }
                     }
                 });
@@ -327,6 +338,12 @@ public final class Dispatcher implements Runnable {
         @Override
         public void close() {
             if (!closed) {
+                try {
+                    out.flush(this.channel);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
                 this.closed = true;
 
                 try {

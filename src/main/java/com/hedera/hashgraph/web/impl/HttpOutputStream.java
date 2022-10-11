@@ -1,10 +1,8 @@
 package com.hedera.hashgraph.web.impl;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
-import java.util.Objects;
 
 public class HttpOutputStream {
     private ByteBuffer buffer = ByteBuffer.allocate(1 << 16);
@@ -13,39 +11,43 @@ public class HttpOutputStream {
     }
 
     void reset() {
-//        this.out = Objects.requireNonNull(out);
+        buffer.position(0);
     }
 
-    public void write24BitInteger(int value) throws IOException {
-//        out.write((value >>> 16) & 0xF);
-//        out.write((value >>> 8) & 0xF);
-//        out.write(value & 0XF);
+    // TODO flush is called from one thread, but everything else may be called from another, so this can be bad.
+    void flush(SocketChannel channel) throws IOException {
+        int length = buffer.position();
+        buffer.position(0);
+        channel.write(buffer.slice(0, length));
     }
 
-    public void writeByte(int value) throws IOException {
-//        out.write(value);
+    public void write24BitInteger(int value) {
+        buffer.put((byte) ((value >>> 16) & 0xFF));
+        buffer.put((byte) ((value >>> 8) & 0xFF));
+        buffer.put((byte) (value & 0XFF));
     }
 
-    public void write32BitInteger(int value) throws IOException {
-//        out.write((value >>> 24) & 0xF);
-//        out.write((value >>> 16) & 0xF);
-//        out.write((value >>> 8) & 0xF);
-//        out.write(value & 0XF);
+    public void writeByte(int value) {
+        buffer.put((byte) value);
     }
 
-    public void write16BigInteger(int value) throws IOException {
-//        out.write((value >>> 8) & 0xF);
-//        out.write(value & 0XF);
+    public void write32BitInteger(int value) {
+        buffer.putInt(value);
     }
 
-    public void write32BitUnsignedInteger(long value) throws IOException {
-//        out.write((int) ((value >>> 24) & 0xF));
-//        out.write((int) ((value >>> 16) & 0xF));
-//        out.write((int) ((value >>> 8) & 0xF));
-//        out.write((int) (value & 0XF));
+    public void write16BigInteger(int value) {
+        buffer.put((byte) ((value >>> 8) & 0xFF));
+        buffer.put((byte) (value & 0XFF));
     }
 
-    public void writeBytes(byte[] data, int offset, int length) throws IOException {
-//        out.write(data, offset, length);
+    public void write32BitUnsignedInteger(long value) {
+        buffer.putInt((int) ((value >>> 24) & 0xFF));
+        buffer.putInt((int) ((value >>> 16) & 0xFF));
+        buffer.putInt((int) ((value >>> 8) & 0xFF));
+        buffer.putInt((int) (value & 0XFF));
+    }
+
+    public void writeBytes(byte[] data, int offset, int length) {
+        buffer.put(data, offset, length);
     }
 }

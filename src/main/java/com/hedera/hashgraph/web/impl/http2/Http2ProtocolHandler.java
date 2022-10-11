@@ -25,6 +25,8 @@ public class Http2ProtocolHandler implements ProtocolHandler {
     private static final int AWAITING_SETTINGS = 1;
     private static final int AWAITING_FRAME = 2;
     private static final int READY_FOR_DISPATCH = 3;
+    private static final int DISPATCHING = 4;
+    private static final int DONE = 5;
 
     private final Settings clientSettings = new Settings();
     private final Settings serverSettings = new Settings();
@@ -48,6 +50,7 @@ public class Http2ProtocolHandler implements ProtocolHandler {
             while (!needMoreData) {
                 switch (requestData.getState()) {
                     case START ->  {
+                        System.out.println("New Stream");
                         // Send MY settings to the client (including the max stream number)
                         SettingsFrame.write(out, serverSettings);
                         requestData.setState(AWAITING_SETTINGS);
@@ -107,6 +110,11 @@ public class Http2ProtocolHandler implements ProtocolHandler {
                             }
                         });
                         doDispatch.accept(data, webRequest);
+                        requestData.setState(DISPATCHING);
+                        return;
+                    }
+                    case DISPATCHING, DONE -> {
+                        return;
                     }
                 }
             }
@@ -137,8 +145,11 @@ public class Http2ProtocolHandler implements ProtocolHandler {
             final var requestData = request.getRequestData();
             DataFrame.write(out, requestData.getRequestId(), true, requestData.getData(), 0, requestData.getDataLength());
 
+            requestData.setState(DONE);
+
             // Close the stream.
-            RstStreamFrame.write(out, Http2ErrorCode.NO_ERROR, requestData.getRequestId());
+//            RstStreamFrame.write(out, Http2ErrorCode.NO_ERROR, requestData.getRequestId());
+            requestData.close();
         } catch (IOException fatalToConnection) {
             fatalToConnection.printStackTrace();
             channelData.close();
@@ -229,6 +240,7 @@ public class Http2ProtocolHandler implements ProtocolHandler {
 
     private void handleHeaders(HttpInputStream in, HttpOutputStream out, Dispatcher.RequestData requestData) throws IOException {
         final var headerFrame = HeadersFrame.parse(in);
+        System.out.println("New header for request " + headerFrame.getStreamId());
         requestData.setRequestId(headerFrame.getStreamId());
         if (headerFrame.isCompleteHeader()) {
             // I have all the bytes I will need... so I can go and decode them

@@ -43,7 +43,7 @@ class EchoTest {
 
         final var client = new OkHttpClient.Builder()
                 .followRedirects(false)
-                .callTimeout(Duration.ofMillis(20000))
+                .callTimeout(Duration.ofMillis(2000000))
                 .protocols(Collections.singletonList(Protocol.H2_PRIOR_KNOWLEDGE))
                 .retryOnConnectionFailure(false)
                 .build();

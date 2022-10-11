@@ -137,6 +137,7 @@ public final class ChannelManager {
      */
     private void accept() {
         try {
+            System.out.println("New connection accepted");
             // Go ahead and accept the socket channel and configure it
             // TODO Make sure we have a configured upper limit on number of active connections
             // and keep track of that information
