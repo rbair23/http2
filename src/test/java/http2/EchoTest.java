@@ -1,5 +1,7 @@
 package http2;
 
+import com.hedera.hashgraph.web.ResponseAlreadySentException;
+import com.hedera.hashgraph.web.StatusCode;
 import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.WebServer;
 import okhttp3.OkHttpClient;
@@ -30,10 +32,10 @@ class EchoTest {
                     .setContentEncoding(WebHeaders.CONTENT_ENCODING_GZIP)
                     .setServer("EchoTest");
 
-            try (var out = req.startResponse(responseHeaders, 200)) {
+            try (var out = req.startResponse(StatusCode.OK, responseHeaders)) {
                 out.write(responseBody.getBytes());
-            } catch (IOException io) {
-                fail(io);
+            } catch (IOException | ResponseAlreadySentException exception) {
+                fail(exception);
             }
         });
         server.start();

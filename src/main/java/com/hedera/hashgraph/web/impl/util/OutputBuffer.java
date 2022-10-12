@@ -6,6 +6,9 @@ import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 
+/**
+ * An OutputStream around a ByteBuffer that is reusable and has helpful write methods.
+ */
 public class OutputBuffer extends OutputStream {
     private final Runnable onCloseCallback;
     private final Runnable onDataFullCallback;

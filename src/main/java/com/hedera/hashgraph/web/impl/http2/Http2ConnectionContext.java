@@ -65,9 +65,9 @@ public class Http2ConnectionContext extends ConnectionContext {
                     case START ->  {
                         System.out.println("New Stream");
                         // Send MY settings to the client (including the max stream number)
-                        channelSession.getOutputBuffer().reset();
-                        SettingsFrame.write(channelSession.getOutputBuffer(), serverSettings);
-                        channelSession.sendOutputData();
+                        outputBuffer.reset();
+                        SettingsFrame.write(outputBuffer, serverSettings);
+                        outputBuffer.sendContentsToChannel(channel);
 
                         state = State.AWAITING_SETTINGS;
                     }
