@@ -77,7 +77,7 @@ public final class HttpInputStream {
      *             point later. For example, if a client tries to read a 1K byte array from the stream but the
      *             buffer within the stream is less than 1K, an exception will be thrown.
      */
-    HttpInputStream(final int size) {
+    public HttpInputStream(final int size) {
         if (size <= 0) {
             throw new IllegalArgumentException("The size must be positive");
         }
@@ -120,7 +120,7 @@ public final class HttpInputStream {
     /**
      * Called to reset this instance.
      */
-    void reset() {
+    public void reset() {
         this.markedPosition = -1;
         this.readPosition = 0;
         this.endPosition = 0;
@@ -262,6 +262,22 @@ public final class HttpInputStream {
         final String string = peekString(numBytes, charset);
         this.readPosition += numBytes;
         return string;
+    }
+
+    public HttpVersion readVersion() {
+        // "HTTP/1.0"
+        if (readByte() != 'H') throw new RuntimeException();
+        if (readByte() != 'T') throw new RuntimeException();
+        if (readByte() != 'T') throw new RuntimeException();
+        if (readByte() != 'P') throw new RuntimeException();
+        if (readByte() != '/') throw new RuntimeException();
+        int majorChar = readByte();
+        if (readByte() != '.') throw new RuntimeException();
+        int minorChar = readByte();
+        if (majorChar == '1' && minorChar == '0') return HttpVersion.HTTP_1;
+        if (majorChar == '1' && minorChar == '1') return HttpVersion.HTTP_1_1;
+        if (majorChar == '2' && minorChar == '0') return HttpVersion.HTTP_2;
+        throw new RuntimeException();
     }
 
     /**

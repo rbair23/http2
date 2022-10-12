@@ -1,8 +1,9 @@
 package com.hedera.hashgraph.web;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.function.BiConsumer;
 
 public final class WebHeaders {
@@ -14,14 +15,33 @@ public final class WebHeaders {
     public static final String CONTENT_ENCODING_COMPRESS = "compress";
     public static final String CONTENT_ENCODING_DEFLATE = "deflate";
 
+    /** Formatter for http header dates */
+    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern(
+            "EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US)
+            .withZone(ZoneId.of("GMT"));
+
     private final Map<String, String> headers = new HashMap<>();
 
     public void put(String key, String value) {
         headers.put(key, value);
     }
 
+    /**
+     * Put a date header value
+     *
+     * @param key header key
+     * @param date header value instant
+     */
+    public void put(String key, Instant date) {
+        headers.put(key, FORMATTER.format(date));
+    }
+
     public String get(String key) {
         return headers.get(key);
+    }
+
+    public void clear() {
+        headers.clear();
     }
 
     public void forEach(BiConsumer<String, String> callback) {

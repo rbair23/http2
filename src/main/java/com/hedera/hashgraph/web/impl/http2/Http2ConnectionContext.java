@@ -1,55 +1,75 @@
 package com.hedera.hashgraph.web.impl.http2;
 
 import com.hedera.hashgraph.web.WebHeaders;
-import com.hedera.hashgraph.web.WebRoutes;
 import com.hedera.hashgraph.web.impl.*;
 import com.hedera.hashgraph.web.impl.http2.frames.*;
+import com.hedera.hashgraph.web.impl.session.ConnectionContext;
+import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
+import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import com.twitter.hpack.Decoder;
-import com.twitter.hpack.Encoder;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.util.Objects;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiConsumer;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Consumer;
 
 // Right now, this is created per-thread. To be reused across threads, we have to do some kind of per-thread state,
 // such as for settings and request handlers.
-public class Http2Protocol extends ProtocolBase {
+public class Http2ConnectionContext extends ConnectionContext {
+     
     private static final int FRAME_HEADER_SIZE = 9;
     private static final int CONNECTION_STREAM_ID = 0;
 
-    private static final int START = 0;
-    private static final int AWAITING_SETTINGS = 1;
-    private static final int AWAITING_FRAME = 2;
-    private static final int READY_FOR_DISPATCH = 3;
-    private static final int DISPATCHING = 4;
-    private static final int DONE = 5;
+    private enum State {START, AWAITING_SETTINGS, AWAITING_FRAME, READY_FOR_DISPATCH, DISPATCHING, DONE};
+    private State state;
 
-    private final Settings clientSettings = new Settings();
-    private final Settings serverSettings = new Settings();
+    final Settings clientSettings = new Settings();
+    final Settings serverSettings = new Settings();
 
-    public Http2Protocol() {
+    /**
+     * This map of {@link Http2RequestContext} is used by the HTTP/2.0 implementation, where there are
+     * multiple requests per channel. Cleared on {@link #close()}.
+     */
+    private Map<Integer, Http2RequestContext> multiStreamData = new HashMap<>();
+
+    public Http2ConnectionContext(ContextReuseManager contextReuseManager, Dispatcher dispatcher) {
+        super(contextReuseManager, dispatcher);
         serverSettings.setMaxConcurrentStreams(10); // Spec recommends 100, at least. Maybe we can even do 1000 or something?
     }
 
     @Override
-    public void handle(Dispatcher.ChannelData data, BiConsumer<Dispatcher.ChannelData, WebRequestImpl> doDispatch) {
-        final var in = data.getIn();
-        final var out = data.getOut();
-        final var requestData = data.getRequestData();
+    protected void reset() {
+        super.reset();
+        // TODO clientSettings.reset();
+        // TODO serverSettings.reset();
+
+    }
+
+    @Override
+    public void close() {
+        super.close();
+        // TODO Probably produces a bunch of garbage?
+        this.multiStreamData.forEach((k, v) -> v.close());
+        this.multiStreamData.clear();
+    }
+
+    @Override
+    public void handle(Consumer<HttpVersion> upgradeConnectionCallback) {
+// TODO where?       final Http2RequestContext requestSession = multiStreamData.get();
 
         try {
             var needMoreData = false;
             while (!needMoreData) {
-                switch (requestData.getState()) {
+                switch (state) {
                     case START ->  {
                         System.out.println("New Stream");
                         // Send MY settings to the client (including the max stream number)
-                        SettingsFrame.write(out, serverSettings);
-                        requestData.setState(AWAITING_SETTINGS);
+                        channelSession.getOutputBuffer().reset();
+                        SettingsFrame.write(channelSession.getOutputBuffer(), serverSettings);
+                        channelSession.sendOutputData();
+
+                        state = State.AWAITING_SETTINGS;
                     }
                     case AWAITING_SETTINGS -> {
                         if (in.available(FRAME_HEADER_SIZE)) {
@@ -62,7 +82,7 @@ public class Http2Protocol extends ProtocolBase {
                                 throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, CONNECTION_STREAM_ID);
                             }
 
-                            requestData.setState(AWAITING_FRAME);
+                            state = State.AWAITING_FRAME;
                         } else {
                             needMoreData = true;
                         }
@@ -71,7 +91,7 @@ public class Http2Protocol extends ProtocolBase {
                         if (in.available(3)) {
                             int length = in.peek24BitInteger();
                             if (in.available(FRAME_HEADER_SIZE + length)) {
-                                handleFrame(in, out, requestData);
+                                handleFrame(channelSession, requestSession);
                             } else {
                                 needMoreData = true;
                             }
@@ -81,32 +101,13 @@ public class Http2Protocol extends ProtocolBase {
                     }
                     case READY_FOR_DISPATCH -> {
                         // Go forth and handle. Good luck.
-                        final var requestHeaders = requestData.getHeaders();
-                        requestData.setPath(requestHeaders.get(":path"));
-                        requestData.setMethod(requestHeaders.get(":method"));
-                        requestData.setVersion("HTTP/2.0");
-                        final var webRequest = new WebRequestImpl(requestData, (headers, responseCode) -> {
-                            final var encoder = new Encoder((int) clientSettings.getHeaderTableSize());
-                            final var hos = new RequestDataOutputStream(requestData);
-                            encoder.encodeHeader(hos, ":status".getBytes(), ("" + responseCode).getBytes(), false);
-                            final AtomicReference<IOException> ioException = new AtomicReference<>();
-                            headers.forEach((k, v) -> {
-                                try {
-                                    encoder.encodeHeader(hos, k.getBytes(), v.getBytes(), false);
-                                } catch (IOException e) {
-                                    ioException.set(e);
-                                }
-                            });
-
-                            final var e = ioException.get();
-                            if (e != null) {
-                                throw e;
-                            } else {
-                                HeadersFrame.write(out, requestData.getRequestId(), requestData.getData(), 0, hos.getCount());
-                            }
-                        });
-                        doDispatch.accept(data, webRequest);
-                        requestData.setState(DISPATCHING);
+                        final var requestHeaders = requestSession.getHeaders();
+                        requestSession.setPath(requestHeaders.get(":path"));
+                        requestSession.setMethod(requestHeaders.get(":method"));
+                        requestSession.setVersion("HTTP/2.0");
+                        final var webRequest = new WebRequestImpl(requestSession, );
+                        doDispatch.accept(channelSession, webRequest);
+                        state = State.DISPATCHING;
                         return;
                     }
                     case DISPATCHING, DONE -> {
@@ -127,40 +128,6 @@ public class Http2Protocol extends ProtocolBase {
         }
     }
 
-    @Override
-    public void onServerError(Dispatcher.ChannelData channelData, WebRequestImpl request, RuntimeException ex) {
-        // Who knows what happened? I got some random runtime exception, so it is a 500 class error
-        // that needs to be returned.
-    }
-
-    @Override
-    public void onEndOfRequest(final Dispatcher.ChannelData channelData, final WebRequestImpl request) {
-        try {
-            // Create the DataFrame to send to the client using the data within the RequestData object
-            final var out = channelData.getOut();
-            final var requestData = request.getRequestData();
-            DataFrame.write(out, requestData.getRequestId(), true, requestData.getData(), 0, requestData.getDataLength());
-
-            requestData.setState(DONE);
-
-            // Close the stream.
-//            RstStreamFrame.write(out, Http2ErrorCode.NO_ERROR, requestData.getRequestId());
-            requestData.close();
-        } catch (IOException fatalToConnection) {
-            fatalToConnection.printStackTrace();
-            channelData.close();
-        }
-    }
-
-    @Override
-    public void on404(Dispatcher.ChannelData channelData, WebRequestImpl request) {
-        // Uh.... 404?
-    }
-
-    @Override
-    protected void flush(Dispatcher.ChannelData channelData, Dispatcher.RequestData requestData) {
-        // take data from the request data and write it to the output stream
-    }
 
     // TODO Spec says this. How to enforce it for all frames? It seems dangerous to check it each and every method
     /*
@@ -180,33 +147,36 @@ public class Http2Protocol extends ProtocolBase {
 
      */
 
-    private void handleFrame(HttpInputStream in, HttpOutputStream out, Dispatcher.RequestData req) throws IOException {
+    private void handleFrame(ConnectionContext channelSession, RequestSession requestSession) throws IOException {
+        HttpInputStream in = channelSession.getIn();
         if (in.available(3)) {
             int length = in.peek24BitInteger();
             if (in.available(FRAME_HEADER_SIZE + length)) {
                 final var type = FrameType.valueOf(in.peekByte(3));
                 switch (type) {
-                    case SETTINGS -> handleSettings(in, out, req);
-                    case WINDOW_UPDATE -> handleWindowUpdate(in, out);
-                    case HEADERS -> handleHeaders(in, out, req);
-                    case RST_STREAM -> handleRstStream(in, out);
-                    case PING -> handlePing(in, out);
+                    case SETTINGS -> handleSettings(channelSession, requestSession);
+                    case WINDOW_UPDATE -> handleWindowUpdate(channelSession);
+                    case HEADERS -> handleHeaders(channelSession, requestSession);
+                    case RST_STREAM -> handleRstStream(channelSession);
+                    case PING -> handlePing(channelSession);
                     // I don't know how to handle this one, so just skip it.
 
                     // SPEC: 4.1 Frame Format
                     // Implementations MUST ignore and discard frames of unknown types.
-                    default -> skipUnknownFrame(in);
+                    default -> skipUnknownFrame(channelSession);
                 }
             }
         }
     }
 
-    private void skipUnknownFrame(HttpInputStream in) {
+    private void skipUnknownFrame(ConnectionContext channelSession) {
+        HttpInputStream in = channelSession.getIn();
         final var frameLength = in.peek24BitInteger();
         in.skip(frameLength + FRAME_HEADER_SIZE);
     }
 
-    private void handleSettings(HttpInputStream in, HttpOutputStream out, Dispatcher.RequestData req) throws IOException {
+    private void handleSettings(ConnectionContext channelSession, RequestSession requestSessioneq) throws IOException {
+        HttpInputStream in = channelSession.getIn();
         // We need enough bytes to check the "type" field to confirm this is, in fact, a settings frame.
         if (in.available(4)) {
             // SPEC: 3.4 HTTP/2 Connection Preface
@@ -223,26 +193,32 @@ public class Http2Protocol extends ProtocolBase {
             final var length = in.peek24BitInteger();
             if (in.available(FRAME_HEADER_SIZE + length)) {
                 SettingsFrame.parseAndMerge(in, clientSettings);
-                SettingsFrame.writeAck(out);
-                req.setState(AWAITING_FRAME);
+                OutputBuffer outputBuffer = channelSession.getOutputBuffer().reset();
+                SettingsFrame.writeAck(outputBuffer);
+                channelSession.sendOutputData();
+                requestSessioneq.setState(AWAITING_FRAME);
             }
         }
     }
 
-    private void handleWindowUpdate(HttpInputStream in, HttpOutputStream out) throws IOException {
+    private void handleWindowUpdate(ConnectionContext channelSession) throws IOException {
+        HttpInputStream in = channelSession.getIn();
         final var windowFrame = WindowUpdateFrame.parse(in);
         final var streamId = windowFrame.getStreamId();
         if (streamId != CONNECTION_STREAM_ID) {
-            submitFrame(windowFrame, out);
+            OutputBuffer outputBuffer = channelSession.getOutputBuffer().reset();
+            submitFrame(windowFrame, channelSession);
+            channelSession.sendOutputData();
         } else {
             // TODO need to do something with the default flow control settings for the connection...
         }
     }
 
-    private void handleHeaders(HttpInputStream in, HttpOutputStream out, Dispatcher.RequestData requestData) throws IOException {
+    private void handleHeaders(ConnectionContext channelSession, RequestSession requestSession) throws IOException {
+        HttpInputStream in = channelSession.getIn();
         final var headerFrame = HeadersFrame.parse(in);
         System.out.println("New header for request " + headerFrame.getStreamId());
-        requestData.setRequestId(headerFrame.getStreamId());
+        requestSession.setRequestId(headerFrame.getStreamId());
         if (headerFrame.isCompleteHeader()) {
             // I have all the bytes I will need... so I can go and decode them
             final var decoder = new Decoder(
@@ -254,15 +230,18 @@ public class Http2Protocol extends ProtocolBase {
                 // sensitive is a boolean
                 headers.put(new String(name), new String(value));
             });
-            requestData.setHeaders(headers);
+            requestSession.setHeaders(headers);
         }
 
         if (headerFrame.isEndStream()) {
-            requestData.setState(READY_FOR_DISPATCH);
+            state = State.READY_FOR_DISPATCH;
         }
     }
 
-    private void submitFrame(Frame frame, HttpOutputStream out) {
+    private void submitFrame(Frame frame, ConnectionContext channelSession) {
+        final OutputBuffer outputBuffer = channelSession.getOutputBuffer().reset();
+//        frame.
+        channelSession.sendOutputData();
 //        final var handler = requestHandlers.computeIfAbsent(streamId, k -> {
 //            final var h = new Http2RequestHandler(out);
 //            threadPool.execute(h);
@@ -272,17 +251,17 @@ public class Http2Protocol extends ProtocolBase {
 //        handler.submit(frame);
     }
 
-    private void handleRstStream(HttpInputStream in, HttpOutputStream out) throws IOException {
-        final var frame = RstStreamFrame.parse(in);
+    private void handleRstStream(ConnectionContext channelSession) throws IOException {
+        final var frame = RstStreamFrame.parse(channelSession.getIn());
         if (frame.getStreamId() > CONNECTION_STREAM_ID) {
-            submitFrame(frame, out);
+            submitFrame(frame, channelSession);
         }
     }
 
-    private void handlePing(HttpInputStream in, HttpOutputStream out) throws IOException {
-        final var frame = PingFrame.parse(in);
+    private void handlePing(ConnectionContext channelSession) throws IOException {
+        final var frame = PingFrame.parse(channelSession.getIn());
         if (frame.getStreamId() > CONNECTION_STREAM_ID) {
-            submitFrame(frame, out);
+            submitFrame(frame, channelSession);
         }
     }
 }

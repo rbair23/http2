@@ -2,6 +2,7 @@ package com.hedera.hashgraph.web;
 
 import com.hedera.hashgraph.web.impl.ChannelManager;
 import com.hedera.hashgraph.web.impl.Dispatcher;
+import com.hedera.hashgraph.web.impl.IncomingDataHandler;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -70,6 +71,8 @@ public final class WebServer {
      */
     private Dispatcher dispatcher;
 
+    private IncomingDataHandler incomingDataHandler;
+
     /**
      * Responsible for managing connections.
      */
@@ -79,7 +82,7 @@ public final class WebServer {
      * This thread is used for running the dispatcher. It is created on {@link #start()}
      * and cleared when the server stops.
      */
-    private Thread dispatchThread;
+    private Thread incomingDataHandlerThread;
 
     /**
      * Create a new web server with default configuration. By default, the server will use
@@ -133,10 +136,11 @@ public final class WebServer {
 
         // Create and start the dang thread
         this.channelManager = new ChannelManager(ssc, config.noDelay());
-        this.dispatcher = new Dispatcher(config, routes, config.executor(), channelManager);
-        this.dispatchThread = new Thread(dispatcher, "WEB-Dispatcher");
+        this.dispatcher = new Dispatcher(routes, config.executor());
+        this.incomingDataHandler = new IncomingDataHandler(config, dispatcher, channelManager);
+        this.incomingDataHandlerThread = new Thread(incomingDataHandler, "WEB-Incoming-Data-Handler");
         lifecycle = Lifecycle.STARTED;
-        this.dispatchThread.start();
+        this.incomingDataHandlerThread.start();
     }
 
     /**
@@ -159,7 +163,7 @@ public final class WebServer {
 //        this.selector.wakeup();
         config.executor().shutdown();
         channelManager.shutdown();
-        dispatcher.shutdown();
+        incomingDataHandler.shutdown();
 //        // TODO Replace the use of System.currentTimeMillis with something like from platform that
 //        //      lets me fake out the time for testing purposes.
 //        long latest = System.currentTimeMillis() + delay * 1000L;
@@ -187,9 +191,9 @@ public final class WebServer {
 //            timer1.cancel();
 //        }
 
-        if (dispatchThread != null && dispatchThread != Thread.currentThread()) {
+        if (incomingDataHandlerThread != null && incomingDataHandlerThread != Thread.currentThread()) {
             try {
-                dispatchThread.join();
+                incomingDataHandlerThread.join();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
 //                logger.log (System.Logger.Level.TRACE, "ServerImpl.stop: ", e);

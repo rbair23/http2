@@ -1,4 +1,7 @@
-package com.hedera.hashgraph.web.impl.http;
+package com.hedera.hashgraph.web;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * HTTP Status return codes {@see https://www.w3.org/Protocols/rfc2616/rfc2616-sec6.html#sec6.1.1}
@@ -54,5 +57,22 @@ public enum StatusCode {
 
     StatusCode(int code) {
         this.code = code;
+        addCodeToMap(code, this);
+    }
+
+    private static final Map<Integer, StatusCode> codeLookupMap = new HashMap<>(1000);
+
+    private void addCodeToMap(int code, StatusCode statusCode) {
+        codeLookupMap.put(code,statusCode);
+    }
+
+    /**
+     * Get the StatusCode enum for code number
+     *
+     * @param code the code number
+     * @return StatusCode enum if one exists or null if unknown code number
+     */
+    public static StatusCode forCode(int code) {
+        return codeLookupMap.get(code);
     }
 }

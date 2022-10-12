@@ -1,7 +1,7 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
 import com.hedera.hashgraph.web.impl.HttpInputStream;
-import com.hedera.hashgraph.web.impl.HttpOutputStream;
+import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Exception;
 
@@ -83,7 +83,7 @@ public final class RstStreamFrame extends Frame {
      * @param streamId The stream id. Must not be 0.
      * @throws IOException An exception during writing
      */
-    public static void write(HttpOutputStream out, Http2ErrorCode code, int streamId) throws IOException {
+    public static void write(OutputBuffer out, Http2ErrorCode code, int streamId) throws IOException {
         // Write out the header.
         Frame.writeHeader(out, 4, FrameType.RST_STREAM, (byte) 0, streamId);
         out.write32BitUnsignedInteger(code.ordinal());

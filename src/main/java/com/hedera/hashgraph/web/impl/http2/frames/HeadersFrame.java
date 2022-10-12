@@ -1,10 +1,9 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
-import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.impl.HttpInputStream;
-import com.hedera.hashgraph.web.impl.HttpOutputStream;
-import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
+import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Objects;
 
@@ -113,8 +112,12 @@ public final class HeadersFrame extends Frame {
         return new HeadersFrame(frameLength, flags, streamId, fieldBlockFragment);
     }
 
-    public static void write(HttpOutputStream out, int streamId, byte[] data, int offset, int length) throws IOException {
-        Frame.writeHeader(out, data.length, FrameType.HEADERS, (byte) 0x0, streamId);
-        out.writeBytes(data, offset, length);
+    public static void writeHeader(OutputBuffer out, int streamId, int headersSize) throws IOException {
+        Frame.writeHeader(out, headersSize, FrameType.HEADERS, (byte) 0x0, streamId);
+    }
+
+    public static void write(OutputBuffer out, int streamId, ByteArrayOutputStream headerContentsBuffer) throws IOException {
+        Frame.writeHeader(out, headerContentsBuffer.size(), FrameType.HEADERS, (byte) 0x0, streamId);
+        headerContentsBuffer.writeTo(out);
     }
 }

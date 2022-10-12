@@ -1,7 +1,7 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
 import com.hedera.hashgraph.web.impl.HttpInputStream;
-import com.hedera.hashgraph.web.impl.HttpOutputStream;
+import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Exception;
 
@@ -154,7 +154,7 @@ public final class SettingsFrame extends Frame {
      * @param out The output stream. Must not be null.
      * @throws IOException In case something cannot be written properly.
      */
-    public static void writeAck(final HttpOutputStream out) throws IOException {
+    public static void writeAck(final OutputBuffer out) throws IOException {
         Frame.writeHeader(out, 0, FrameType.SETTINGS, (byte) 0x1, 0);
     }
 
@@ -165,7 +165,7 @@ public final class SettingsFrame extends Frame {
      * @param settings Cannot be null
      * @throws IOException If we cannot write
      */
-    public static void write(final HttpOutputStream out, final Settings settings) throws IOException {
+    public static void write(final OutputBuffer out, final Settings settings) throws IOException {
         // Write out the header. The payload length is 36 because we will write all 6 fields out
         Frame.writeHeader(out, 36, FrameType.SETTINGS, (byte) 0, 0);
 

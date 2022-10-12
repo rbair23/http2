@@ -1,7 +1,7 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
 import com.hedera.hashgraph.web.impl.HttpInputStream;
-import com.hedera.hashgraph.web.impl.HttpOutputStream;
+import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -89,9 +89,16 @@ public final class DataFrame extends Frame {
         return new DataFrame(frameLength, flags, streamId, data);
     }
 
-    public static void write(HttpOutputStream out, int streamId, boolean last, byte[] data, int offset, int length) throws IOException {
-        Frame.writeHeader(out, data.length, FrameType.DATA, (byte) 0x0, streamId);
-        out.writeBytes(data, offset, length);
+    public static void writeHeader(OutputBuffer out, int streamId, int dataSize) throws IOException {
+        Frame.writeHeader(out, dataSize, FrameType.DATA, (byte) 0x0, streamId);
+    }
+    public static void writeLastHeader(OutputBuffer out, int streamId) throws IOException {
+        Frame.writeHeader(out, 0, FrameType.DATA, (byte) 0x1, streamId);
+    }
+
+    public static void write(OutputBuffer out, int streamId, boolean last, OutputBuffer frameData) throws IOException {
+        Frame.writeHeader(out, frameData.size(), FrameType.DATA, (byte) 0x0, streamId);
+        out.write(frameData);
 
         if (last) {
             Frame.writeHeader(out, 0, FrameType.DATA, (byte) 0x1, streamId);

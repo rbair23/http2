@@ -38,7 +38,7 @@ public record WebServerConfig(
      */
     private static final int DEFAULT_BACKLOG = 0;
     private static final int DEFAULT_MAX_IDLE_CONNECTIONS = 200 ;
-    private static final int DEFAULT_MAX_REQUEST_SIZE = (1 << 14) + 128; // slightly more than 16K
+    public static final int DEFAULT_MAX_REQUEST_SIZE = (1 << 14) + 128; // slightly more than 16K
 
     /*
         Additional configuration we may want
