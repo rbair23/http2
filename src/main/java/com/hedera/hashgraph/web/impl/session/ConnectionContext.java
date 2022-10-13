@@ -1,8 +1,8 @@
 package com.hedera.hashgraph.web.impl.session;
 
+import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.impl.*;
-import com.hedera.hashgraph.web.impl.http.HttpProtocol;
-import com.hedera.hashgraph.web.impl.http2.Http2ConnectionContext;
+import com.hedera.hashgraph.web.impl.util.HttpInputStream;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 import java.io.IOException;
@@ -11,46 +11,40 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
- * Represents the data needed on a per-channel basis. These objects are meant to be reused for future channels, to cut
- * down on garbage collector pressure. Creation of these objects is controlled
- * by {@link ContextReuseManager}. When the object is closed, it will shut down the channel
- * and then clean itself up a bit and put itself back into the idleChannelData list.
+ * Represents the data and logic associated with processing a request. The {@link ConnectionContext} represents
+ * either a physical connection, or a logical connection. For example, in HTTP/2.0, a single physical connection
+ * produces one or more "streams". Each "stream" can be thought of as a logical connection.
  * <p>
- * Each channel has associated with it two streams -- an input stream from which bytes on the channel are
- * made available, and an output stream into which bytes are to be sent to the client though the channel.
- * Each channel also has a single associated {@link ProtocolBase}. All channels start of with the
- * {@link HttpProtocol}, but may be upgraded to use an {@link Http2ConnectionContext} if the original
- * protocol detects it. When the channel data object is closed, it goes back to using the HTTP protocol handler.
+ * A {@link ConnectionContext} can be closed. When it represents a physical connection, closing the context will
+ * close the underlying connection as well. When it represents a logical connection, closing the context will
+ * not affect the underlying physical connection.
  * <p>
- * There is some ugliness here because we have two ways of using {@link RequestSession} here. For HTTP 1.0 and
- * 1.1, we can reuse a single {@link RequestSession} instance. For HTTP 2.0, we need to use a map of them,
- * because there is one per stream, and they are key'd by stream ID (an integer). Since this single instance
- * of {@link ConnectionContext} is intended to be used for both, we have to provide both the "single stream data"
- * request data instance and a (potentially empty) map of them.
- * <p>
- * When the {@link ConnectionContext} is closed, all {@link RequestSession} instances are closed and returned to the list of
- * idle instances.
+ * To help improve performance and decrease memory pressure, contexts are reusable. The {@link ContextReuseManager}
+ * is responsible for pooling these resources.
  */
 public abstract class ConnectionContext implements AutoCloseable {
     /**
-     * Null when this instance is in use or when it is the last item in the list, otherwise points to the
-     * next idle instance in the idle chain.
+     * The {@link ContextReuseManager} that manages this instance. This instance will be returned to the
+     * {@link ContextReuseManager} when it is closed.
      */
-    protected ConnectionContext next;
-
     protected final ContextReuseManager contextReuseManager;
 
+    /**
+     * The {@link Dispatcher} to use for dispatching {@link com.hedera.hashgraph.web.WebRequest}s.
+     */
     protected final Dispatcher dispatcher;
 
     /**
-     * A single instance that lives with this instance. When this {@link ConnectionContext} is closed, the
-     * input stream is reset in anticipation of the next channel to be serviced.
+     * The buffered input for this connection. This is a single instance for the lifecycle of the context.
+     * When this {@link ConnectionContext} is closed, the input stream is reset in anticipation of the next channel
+     * to be serviced.
      */
     protected final HttpInputStream in;
 
     /**
      * Output buffer used for channel level sending of data, for HTTP 1 & 1.1 this can be used for responses as well for
      * HTTP 2 each response stream has its own buffer as well and this is just used for channel communications.
+     * TODO Maybe move this to the child classes
      */
     protected final OutputBuffer outputBuffer;
 
@@ -59,27 +53,38 @@ public abstract class ConnectionContext implements AutoCloseable {
      */
     protected SocketChannel channel;
 
-
+    /**
+     * TODO Not sure what this is used for yet
+     */
     private Runnable onCloseCallback;
 
     /**
      * Keeps track of whether the instance is closed. Set to true in {@link #close()} and set to
-     * false in {@link #init(SocketChannel, HttpProtocol, Runnable)}.
+     * false in {@link #resetWithNewChannel(SocketChannel, Runnable)}.
      */
     private boolean closed = true;
 
     /**
      * Create a new instance.
+     *
+     * @param contextReuseManager The {@link ContextReuseManager} that manages this instance. Must not be null.
+     * @param dispatcher The {@link Dispatcher} to use for dispatching requests. Cannot be null.
+     * @param bufferSize The size of the input buffer. A request, including any framing, <b>CANNOT</b>
+     *                   exceed this limit.
      */
-    protected ConnectionContext(ContextReuseManager contextReuseManager, Dispatcher dispatcher) {
-        this.contextReuseManager = contextReuseManager;
-        this.dispatcher = dispatcher;
-        this.in = new HttpInputStream(16*1024);
-        this.outputBuffer = new OutputBuffer(onCloseCallback, onDataFullCallback);
+    protected ConnectionContext(
+            final ContextReuseManager contextReuseManager,
+            final Dispatcher dispatcher,
+            int bufferSize) {
+        this.contextReuseManager = Objects.requireNonNull(contextReuseManager);
+        this.dispatcher = Objects.requireNonNull(dispatcher);
+        this.in = new HttpInputStream(bufferSize);
+        this.outputBuffer = new OutputBuffer(bufferSize, onCloseCallback, () -> { });
     }
 
     /**
-     * Resets the state of this channel before being reused. initialize
+     * Resets the state of this channel before being reused. Called by the {@link ContextReuseManager} only.
+     * Transitions this {@link ConnectionContext} to be open.
      *
      * @param channel The new channel to hold data for.
      */
@@ -91,9 +96,11 @@ public abstract class ConnectionContext implements AutoCloseable {
     }
 
     /**
-     * Reset all state for reuse
+     * Reset all state for reuse. Subclasses <b>MUST</b> call the super implementation.
+     * edu.umd.cs.findbugs.annotations.OverrideMustInvoke
      */
     protected void reset() {
+        in.reset();
         outputBuffer.reset();
     }
 
@@ -103,6 +110,8 @@ public abstract class ConnectionContext implements AutoCloseable {
             this.closed = true;
 
             try {
+                // TODO We do NOT want to do this for Http2RequestContext, but we do want those contexts to
+                //      transition the "closed" flag.
                 this.channel.close();
             } catch (IOException ignored) {
                 // TODO Maybe a warning? Or an info? Or maybe just debug logging.
@@ -111,13 +120,17 @@ public abstract class ConnectionContext implements AutoCloseable {
             this.channel = null;
             this.in.reset();
 
-
-            contextReuseManager.returnChannelSession(this);
+            contextReuseManager.returnContext(this);
 
             this.onCloseCallback.run();
         }
     }
 
+    /**
+     * Gets the channel associated with this context.
+     * TODO Should we throw IllegalStateException if called on a closed context? Or something else?
+     * @return The reference to the channel, or null if the context is closed.
+     */
     public SocketChannel getChannel() {
         return channel;
     }
@@ -147,5 +160,11 @@ public abstract class ConnectionContext implements AutoCloseable {
         }
     }
 
-    public abstract void handle(Consumer<HttpVersion> upgradeConnectionCallback);
+    /**
+     * Called to process the request as far as it can with the given available data in the input stream.
+     *
+     * @param onConnectionUpgrade A callback to be invoked if the context needs to be upgraded. For example,
+     *                            the HTTP/1.1 context may invoke this to upgrade to HTTP/2.0.
+     */
+    public abstract void handle(final Consumer<HttpVersion> onConnectionUpgrade);
 }

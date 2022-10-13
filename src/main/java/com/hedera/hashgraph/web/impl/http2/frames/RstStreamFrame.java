@@ -1,6 +1,6 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
-import com.hedera.hashgraph.web.impl.HttpInputStream;
+import com.hedera.hashgraph.web.impl.util.HttpInputStream;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Exception;

@@ -4,7 +4,7 @@ import com.hedera.hashgraph.web.ResponseAlreadySentException;
 import com.hedera.hashgraph.web.StatusCode;
 import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.impl.Dispatcher;
-import com.hedera.hashgraph.web.impl.HttpVersion;
+import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
 import com.hedera.hashgraph.web.impl.session.RequestContext;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
@@ -53,7 +53,7 @@ public class Http1ConnectionContext extends RequestContext {
     }
 
     @Override
-    public void handle(Consumer<HttpVersion> upgradeConnectionCallback) {
+    public void handle(Consumer<HttpVersion> onConnectionUpgrade) {
         //         generic-message = start-line
         //                          *(message-header CRLF)
         //                          CRLF
@@ -127,7 +127,7 @@ public class Http1ConnectionContext extends RequestContext {
                                 }
                             }
                             // full preface read, now hand over to http 2 handler
-                            upgradeConnectionCallback.accept(HttpVersion.HTTP_2);
+                            onConnectionUpgrade.accept(HttpVersion.HTTP_2);
                             return;
                         }
                         break;

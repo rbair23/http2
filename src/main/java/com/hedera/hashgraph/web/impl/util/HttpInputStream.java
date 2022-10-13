@@ -1,4 +1,7 @@
-package com.hedera.hashgraph.web.impl;
+package com.hedera.hashgraph.web.impl.util;
+
+import com.hedera.hashgraph.web.impl.Dispatcher;
+import com.hedera.hashgraph.web.HttpVersion;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -96,8 +99,10 @@ public final class HttpInputStream {
      * @param channel The channel from which to read data. Must not be null.
      * @return Whether there is additional data to be read that we didn't get to
      * @throws IOException If the channel is unable to be read.
+     *
+     * TODO I didn't really want this to be public. Boo.
      */
-    boolean addData(SocketChannel channel) throws IOException {
+    public boolean addData(SocketChannel channel) throws IOException {
         assert channel != null : "The dispatcher should never have been able to call this with null for the channel";
 
         // If the buffer is already full, we need to shift
@@ -550,5 +555,13 @@ public final class HttpInputStream {
         } else {
             return b;
         }
+    }
+
+    public void init(HttpInputStream in) {
+        final var length = in.endPosition - in.readPosition;
+        System.arraycopy(in.buffer, in.readPosition, buffer, 0, length);
+        this.markedPosition = -1;
+        this.readPosition = 0;
+        this.endPosition = length;
     }
 }

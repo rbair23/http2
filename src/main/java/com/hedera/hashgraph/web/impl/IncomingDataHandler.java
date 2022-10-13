@@ -1,6 +1,6 @@
 package com.hedera.hashgraph.web.impl;
 
-import com.hedera.hashgraph.web.WebRequest;
+import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.WebServerConfig;
 import com.hedera.hashgraph.web.impl.http2.Http2ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
@@ -11,18 +11,19 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 import java.time.Duration;
 import java.util.Objects;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 
 /**
- * The {@code Dispatcher} coordinates the work of the {@link ChannelManager} (which handles all networking
- * connections with the clients), the {@link ProtocolBase}s, and the data buffers used by the protocol
- * handlers. It also manages the {@link ExecutorService} (or thread pool) to which
- * {@link WebRequest}s are sent. There is a single instance of this class per
- * running {@link com.hedera.hashgraph.web.WebServer}, and it executes on a single thread.
+ * Coordinates the work of the {@link ChannelManager} (which handles all networking connections with the clients),
+ * the logic for processing those incoming request bytes to turn them into
+ * {@link com.hedera.hashgraph.web.WebRequest}s, and the {@link Dispatcher} for dispatching
+ * {@link com.hedera.hashgraph.web.WebRequest}s.
+ * <p>
+ * When closed, the associated {@link ChannelManager} and other classes will also be closed, and any in-flight
+ * requests will be asynchronously canceled (some may still complete, but many will be canceled).
  */
-public final class IncomingDataHandler implements Runnable {
+public final class IncomingDataHandler implements Runnable, AutoCloseable {
     /**
      * The time we want to allow the {@link ChannelManager} to block waiting for connections
      * in {@link ChannelManager#checkConnections(Duration, AtomicInteger, Predicate)}, before giving up if all
@@ -32,7 +33,7 @@ public final class IncomingDataHandler implements Runnable {
     private static final Duration DEFAULT_CHANNEL_TIMEOUT = Duration.ofMillis(500);
 
     /**
-     * Set by the {@link #shutdown()} method when it is time to stop the dispatcher.
+     * Set by the {@link #close()} method when it is time to stop the dispatcher.
      * This is read by one thread, and set by another.
      */
     private volatile boolean shutdown;
@@ -46,23 +47,31 @@ public final class IncomingDataHandler implements Runnable {
     /**
      * The web server's configuration. This will not be null.
      */
-    private final WebServerConfig config; // TODO need to wire config back up
+    private final WebServerConfig config;
 
     /**
      * The number of additional connections that can be made. There is a configurable upper limit.
+     * As a new connection is made, this number is decremented. As the connection is closed,
+     * the number is incremented.
      */
     private final AtomicInteger availableConnections;
 
+    /**
+     * The dispatcher to use for dispatching {@link com.hedera.hashgraph.web.WebRequest}s.
+     */
     private final Dispatcher dispatcher;
-    private final ContextReuseManager contextReuseManager;
 
+    /**
+     * This is a utility class used for reusing the different {@link ConnectionContext} types and subtypes.
+     */
+    private final ContextReuseManager contextReuseManager;
 
     /**
      * Create a new instance. This instance can <b>NOT</b> be safely called from other threads,
-     * except for the {@link #shutdown()} method.
+     * except for the {@link #close()} method, which can be called from any thread.
      *
      * @param config The configuration for the web server. Cannot be null.
-     * @param dispatcher TODO
+     * @param dispatcher The dispatcher to use for dispatching requests. Cannot be null.
      * @param channelManager The channel manager from which to get data from connections. Cannot be null.
      */
     public IncomingDataHandler(
@@ -77,7 +86,7 @@ public final class IncomingDataHandler implements Runnable {
     }
 
     /**
-     * Runs until {@link #shutdown()} is called, or the underlying socket connection fails.
+     * Runs until {@link #close()} is called, or the underlying socket connection fails.
      * This method will iterate over all connections, reading data, processing the data,
      * and dispatching it to the appropriate {@link com.hedera.hashgraph.web.WebRequestHandler}.
      */
@@ -97,8 +106,9 @@ public final class IncomingDataHandler implements Runnable {
                         // it setup.
                         var connectionContext = (ConnectionContext) key.attachment();
                         if (connectionContext == null) {
-                            // always start with http1
-                            connectionContext = contextReuseManager.checkoutHttp1ChannelSession(dispatcher, channel, availableConnections::incrementAndGet);
+                            // Always start with HTTP/1.1
+                            connectionContext = contextReuseManager.checkoutHttp1ChannelSession(
+                                    dispatcher, channel, availableConnections::incrementAndGet);
                             key.attach(connectionContext);
                             availableConnections.decrementAndGet();
                         }
@@ -114,9 +124,7 @@ public final class IncomingDataHandler implements Runnable {
                         }
 
                         // Delegate to the protocol handler!
-                        final var currentConnectionContext = connectionContext;
                         connectionContext.handle(httpVersion -> upgradeHttpVersion(httpVersion, key));
-                        
                         return allDataRead;
                     }
                     return true;
@@ -140,10 +148,11 @@ public final class IncomingDataHandler implements Runnable {
     private void upgradeHttpVersion(final HttpVersion version, final SelectionKey key) {
         if (version == HttpVersion.HTTP_2) {
             ConnectionContext currentConnectionContext = (ConnectionContext) key.attachment();
-            Http2ConnectionContext http2ChannelSession = contextReuseManager.checkoutHttp2ChannelSession(dispatcher, (SocketChannel) key.channel(), availableConnections::incrementAndGet);
+            Http2ConnectionContext http2ChannelSession = contextReuseManager.checkoutHttp2ChannelSession(
+                    dispatcher, (SocketChannel) key.channel(), availableConnections::incrementAndGet);
             key.attach(http2ChannelSession);
-            // TODO copy all state needed from HTTP1 session to HTTP2 session
-            contextReuseManager.returnChannelSession(currentConnectionContext);
+            http2ChannelSession.init(currentConnectionContext);
+            contextReuseManager.returnContext(currentConnectionContext);
             // continue handling with HTTP2
             http2ChannelSession.handle(httpVersion -> upgradeHttpVersion(httpVersion, key));
         } else {
@@ -154,7 +163,8 @@ public final class IncomingDataHandler implements Runnable {
     /**
      * Shuts down the dispatcher.
      */
-    public void shutdown() {
+    public void close() {
         shutdown = true;
+        channelManager.close();
     }
 }

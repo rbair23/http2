@@ -1,10 +1,12 @@
 package com.hedera.hashgraph.web.impl.http2;
 
+import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.impl.*;
 import com.hedera.hashgraph.web.impl.http2.frames.*;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
+import com.hedera.hashgraph.web.impl.util.HttpInputStream;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import com.twitter.hpack.Decoder;
 
@@ -14,69 +16,125 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 
-// Right now, this is created per-thread. To be reused across threads, we have to do some kind of per-thread state,
-// such as for settings and request handlers.
-public class Http2ConnectionContext extends ConnectionContext {
-     
+/**
+ * An implementation of {@link ConnectionContext} representing the physical connection for an HTTP/2.0
+ * request. When this context is closed, the corresponding channel is also closed.
+ * <p>
+ * The HTTP2 input is a set of "frames", with each frame either belonging to the connection itself,
+ * or to one or more "streams". Each "stream" is a logical HTTP connection, represented by the
+ * {@link Http2RequestContext}. Frames for different streams, or for the connection itself, are interleaved
+ * on the wire. The context needs to decode the frames, determine the stream for the frame, create
+ * if necessary a request context, and delegate to it.
+ */
+public final class Http2ConnectionContext extends ConnectionContext {
+    /**
+     * Every frame in HTTP/2.0 is the same size -- 9 bytes.
+     */
     private static final int FRAME_HEADER_SIZE = 9;
-    private static final int CONNECTION_STREAM_ID = 0;
-
-    private enum State {START, AWAITING_SETTINGS, AWAITING_FRAME, READY_FOR_DISPATCH, DISPATCHING, DONE};
-    private State state;
-
-    final Settings clientSettings = new Settings();
-    final Settings serverSettings = new Settings();
 
     /**
-     * This map of {@link Http2RequestContext} is used by the HTTP/2.0 implementation, where there are
-     * multiple requests per channel. Cleared on {@link #close()}.
+     * Each frame defines the stream that the frame belongs to. The stream id of "0" denotes
+     * frames that belong to the connection itself.
      */
-    private Map<Integer, Http2RequestContext> multiStreamData = new HashMap<>();
+    private static final int CONNECTION_STREAM_ID = 0;
 
-    public Http2ConnectionContext(ContextReuseManager contextReuseManager, Dispatcher dispatcher) {
-        super(contextReuseManager, dispatcher);
-        serverSettings.setMaxConcurrentStreams(10); // Spec recommends 100, at least. Maybe we can even do 1000 or something?
+    /**
+     * As with all {@link ConnectionContext} implementations, this implementation contains a state
+     * machine, such that as bytes are read from the input, we behave differently depending on which
+     * state we're in. This enum defines the states.
+     */
+    private enum State { START, AWAITING_SETTINGS, AWAITING_FRAME, CLOSED };
+
+    /**
+     * The current state of this context.
+     */
+    private State state = State.START;
+
+    /**
+     * The settings that the server sets to the client. The client must respect these settings.
+     * These settings, once set, are never altered during the run of the server. (Theoretically
+     * they could be, but we don't support that at this time).
+     */
+    private final Settings serverSettings = new Settings();
+
+    /**
+     * The settings sent from the client to the server. We start off with a default set of settings,
+     * and when the client connects, it must send its settings. Those settings sent by the client
+     * will override the defaults here. When the context is closed, these settings are reset to their
+     * default values.
+     */
+    private final Settings clientSettings = new Settings();
+
+    /**
+     * Each entry in this map represents a "stream". The key is the stream ID. This map is cleared
+     * when the context is closed. Each stream is removed from this map when the individual stream
+     * is closed.
+     */
+    private Map<Integer, Http2RequestContext> streams = new HashMap<>();
+
+    /**
+     * Create a new instance.
+     *
+     * @param contextReuseManager The {@link ContextReuseManager} that manages this instance. Must not be null.
+     * @param dispatcher The {@link Dispatcher} to use for dispatching requests. Cannot be null.
+     */
+    public Http2ConnectionContext(final ContextReuseManager contextReuseManager, final Dispatcher dispatcher) {
+        super(contextReuseManager, dispatcher, Settings.INITIAL_FRAME_SIZE);
+
+        // TODO this configuration value really should come from the web server configs
+        serverSettings.setMaxConcurrentStreams(100);
+    }
+
+    /**
+     * Called by {@link IncomingDataHandler} when it realizes that a connection needs to be upgraded from
+     * HTTP/1.1 to HTTP/2.0. When that happens, this method is called with the previous context, from which
+     * we can fetch any data already present in the previous context.
+     *
+     * @param prev The previous context we need to copy data from
+     */
+    public void init(ConnectionContext prev) {
+        // TODO copy over the state from the current connection context
+        this.channel = prev.getChannel();
+        this.in.init(prev.getIn());
     }
 
     @Override
     protected void reset() {
         super.reset();
-        // TODO clientSettings.reset();
-        // TODO serverSettings.reset();
-
+        clientSettings.resetToDefaults();
+        // Note: We don't need to reset the server settings. They never change.
     }
 
     @Override
     public void close() {
+        // Close each stream first, so they can send any frames on the socket first before
+        // we close it all the way down.
+        this.streams.forEach((k, v) -> v.close());
+        this.streams.clear();
         super.close();
-        // TODO Probably produces a bunch of garbage?
-        this.multiStreamData.forEach((k, v) -> v.close());
-        this.multiStreamData.clear();
     }
 
+    // NOTE: Once in this context, we never perform an upgrade
     @Override
-    public void handle(Consumer<HttpVersion> upgradeConnectionCallback) {
-// TODO where?       final Http2RequestContext requestSession = multiStreamData.get();
-
+    public void handle(Consumer<HttpVersion> ignored) {
         try {
             var needMoreData = false;
             while (!needMoreData) {
                 switch (state) {
+                    // At the very start, the first thing we do is send the SERVER settings to the client.
+                    // Then, we transition to awaiting settings from the client.
                     case START ->  {
-                        System.out.println("New Stream");
-                        // Send MY settings to the client (including the max stream number)
                         outputBuffer.reset();
                         SettingsFrame.write(outputBuffer, serverSettings);
                         outputBuffer.sendContentsToChannel(channel);
-
                         state = State.AWAITING_SETTINGS;
                     }
+                    // SPEC: 3.4 HTTP/2 Connection Preface
+                    // That is, the connection preface ... MUST be followed by a SETTINGS frame...
+                    // Clients and servers MUST treat an invalid connection preface as a connection error
+                    // (Section 5.4.1) of type PROTOCOL_ERROR.
                     case AWAITING_SETTINGS -> {
                         if (in.available(FRAME_HEADER_SIZE)) {
-                            // SPEC: 3.4 HTTP/2 Connection Preface
-                            // That is, the connection preface ... MUST be followed by a SETTINGS frame...
-                            // Clients and servers MUST treat an invalid connection preface as a connection error
-                            // (Section 5.4.1) of type PROTOCOL_ERROR.
                             final var nextFrameType = in.peekByte(3);
                             if (nextFrameType != FrameType.SETTINGS.ordinal()) {
                                 throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, CONNECTION_STREAM_ID);
@@ -87,11 +145,19 @@ public class Http2ConnectionContext extends ConnectionContext {
                             needMoreData = true;
                         }
                     }
+                    // Now that the connection is open and functioning, we will await any kind of frame
+                    // (even another settings frame). If the frame happens to be for the connection,
+                    // we handle it strait away. If the frame is for a stream, we delegate it.
                     case AWAITING_FRAME -> {
+                        // We need to know we have *ALL* the frame data in our buffer before we start
+                        // processing the frame. The first three bytes of the frame tell us the length
+                        // of the payload. When added to the FRAME_HEADER_SIZE, we get the total number
+                        // of bytes for the frame. We then make sure we have ALL those bytes available
+                        // before we process anything.
                         if (in.available(3)) {
                             int length = in.peek24BitInteger();
                             if (in.available(FRAME_HEADER_SIZE + length)) {
-                                handleFrame(channelSession, requestSession);
+                                handleFrame();
                             } else {
                                 needMoreData = true;
                             }
@@ -99,31 +165,27 @@ public class Http2ConnectionContext extends ConnectionContext {
                             needMoreData = true;
                         }
                     }
-                    case READY_FOR_DISPATCH -> {
-                        // Go forth and handle. Good luck.
-                        final var requestHeaders = requestSession.getHeaders();
-                        requestSession.setPath(requestHeaders.get(":path"));
-                        requestSession.setMethod(requestHeaders.get(":method"));
-                        requestSession.setVersion("HTTP/2.0");
-                        final var webRequest = new WebRequestImpl(requestSession, );
-                        doDispatch.accept(channelSession, webRequest);
-                        state = State.DISPATCHING;
-                        return;
-                    }
-                    case DISPATCHING, DONE -> {
-                        return;
+                    // If we somehow get a frame that indicates that the connection should close, then
+                    // we will enter this state.
+                    case CLOSED -> {
+                        close();
                     }
                 }
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            // If an IOException happens, then there is a problem with the underlying connection, and
+            // we should close.
+            e.printStackTrace(); // TODO This should not be printed out, except maybe in TRACE to a log
+            close();
         } catch (Http2Exception e) {
+            // If this exception happens, it means that something is wrong with one of the connection frames.
+            // This is terminal. We're being kind and letting the client know of the problem before
+            // we shut down the connection.
             try {
-                RstStreamFrame.write(out, e.getCode(), e.getStreamId());
+                RstStreamFrame.write(outputBuffer, e.getCode(), e.getStreamId());
             } catch (IOException ee) {
                 System.err.println("Failed to write RST_STREAM frame out, connection is broken!");
-                // TODO Throw some kind of horrible error...
-                ee.printStackTrace();
+                close();
             }
         }
     }
@@ -147,121 +209,96 @@ public class Http2ConnectionContext extends ConnectionContext {
 
      */
 
-    private void handleFrame(ConnectionContext channelSession, RequestSession requestSession) throws IOException {
-        HttpInputStream in = channelSession.getIn();
-        if (in.available(3)) {
-            int length = in.peek24BitInteger();
-            if (in.available(FRAME_HEADER_SIZE + length)) {
-                final var type = FrameType.valueOf(in.peekByte(3));
-                switch (type) {
-                    case SETTINGS -> handleSettings(channelSession, requestSession);
-                    case WINDOW_UPDATE -> handleWindowUpdate(channelSession);
-                    case HEADERS -> handleHeaders(channelSession, requestSession);
-                    case RST_STREAM -> handleRstStream(channelSession);
-                    case PING -> handlePing(channelSession);
-                    // I don't know how to handle this one, so just skip it.
-
-                    // SPEC: 4.1 Frame Format
-                    // Implementations MUST ignore and discard frames of unknown types.
-                    default -> skipUnknownFrame(channelSession);
-                }
-            }
+    /**
+     * Decodes the next frame from the input buffer, and dispatches it to the appropriate method to handle.
+     * There <b>MUST</b> be the entire frame's worth of data in the input buffer before this is called,
+     * or an exception will be thrown causing the entire connection to terminate.
+     *
+     * @throws IOException Thrown if something goes wrong while handling the connection-level frames or the
+     *                     connection input or output streams themselves, representing a broken connection.
+     */
+    private void handleFrame() throws IOException {
+        final var type = FrameType.valueOf(in.peekByte(3));
+        switch (type) {
+            case SETTINGS -> handleSettings();
+            case HEADERS -> handleHeaders();
+            case RST_STREAM -> handleRstStream();
+            case PING -> handlePing();
+            // SPEC: 4.1 Frame Format
+            // Implementations MUST ignore and discard frames of unknown types.
+            default -> skipUnknownFrame();
         }
     }
 
-    private void skipUnknownFrame(ConnectionContext channelSession) {
-        HttpInputStream in = channelSession.getIn();
+    /**
+     * Skips the current frame.
+     */
+    private void skipUnknownFrame() {
         final var frameLength = in.peek24BitInteger();
         in.skip(frameLength + FRAME_HEADER_SIZE);
     }
 
-    private void handleSettings(ConnectionContext channelSession, RequestSession requestSessioneq) throws IOException {
-        HttpInputStream in = channelSession.getIn();
-        // We need enough bytes to check the "type" field to confirm this is, in fact, a settings frame.
-        if (in.available(4)) {
-            // SPEC: 3.4 HTTP/2 Connection Preface
-            // That is, the connection preface ... MUST be followed by a SETTINGS frame...
-            // Clients and servers MUST treat an invalid connection preface as a connection error (Section 5.4.1) of
-            // type PROTOCOL_ERROR.
-            final var nextFrameType = in.peekByte(3); // skip the next frame length
-            if (nextFrameType != FrameType.SETTINGS.ordinal()) {
-                throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, CONNECTION_STREAM_ID);
-            }
-
-            // OK, it was a settings frame, so get the length and then make sure have enough bytes to process
-            // the entire settings frame.
-            final var length = in.peek24BitInteger();
-            if (in.available(FRAME_HEADER_SIZE + length)) {
-                SettingsFrame.parseAndMerge(in, clientSettings);
-                OutputBuffer outputBuffer = channelSession.getOutputBuffer().reset();
-                SettingsFrame.writeAck(outputBuffer);
-                channelSession.sendOutputData();
-                requestSessioneq.setState(AWAITING_FRAME);
-            }
-        }
+    /**
+     * Handles a "ping" frame. This is a physical connection level frame.
+     *
+     * @throws IOException thrown if we cannot write to the output channel
+     */
+    private void handlePing() throws IOException {
+        final var pingData = PingFrame.parseData(in);
+        outputBuffer.reset();
+        PingFrame.writeAck(outputBuffer, pingData);
+        outputBuffer.sendContentsToChannel(channel);
     }
 
-    private void handleWindowUpdate(ConnectionContext channelSession) throws IOException {
-        HttpInputStream in = channelSession.getIn();
-        final var windowFrame = WindowUpdateFrame.parse(in);
-        final var streamId = windowFrame.getStreamId();
-        if (streamId != CONNECTION_STREAM_ID) {
-            OutputBuffer outputBuffer = channelSession.getOutputBuffer().reset();
-            submitFrame(windowFrame, channelSession);
-            channelSession.sendOutputData();
-        } else {
-            // TODO need to do something with the default flow control settings for the connection...
-        }
+    /**
+     * Handles new settings coming from the client. Settings only apply to the physical connection context.
+     *
+     * @throws IOException thrown if we cannot write to the output channel
+     */
+    private void handleSettings() throws IOException {
+        SettingsFrame.parseAndMerge(in, clientSettings);
+        outputBuffer.reset();
+        SettingsFrame.writeAck(outputBuffer);
+        outputBuffer.sendContentsToChannel(channel);
     }
 
-    private void handleHeaders(ConnectionContext channelSession, RequestSession requestSession) throws IOException {
-        HttpInputStream in = channelSession.getIn();
+    /**
+     * The headers frame indicates the start of a new stream. If an existing stream already exists,
+     * it is a big problem! The spec doesn't say what should happen. So I'll start by being belligerent.
+     */
+    private void handleHeaders() {
         final var headerFrame = HeadersFrame.parse(in);
-        System.out.println("New header for request " + headerFrame.getStreamId());
-        requestSession.setRequestId(headerFrame.getStreamId());
-        if (headerFrame.isCompleteHeader()) {
-            // I have all the bytes I will need... so I can go and decode them
-            final var decoder = new Decoder(
-                    (int) serverSettings.getMaxHeaderListSize(),
-                    (int) serverSettings.getHeaderTableSize());
+        final var streamId = headerFrame.getStreamId();
 
-            final var headers = new WebHeaders();
-            decoder.decode(new ByteArrayInputStream(headerFrame.getFieldBlockFragment()), (name, value, sensitive) -> {
-                // sensitive is a boolean
-                headers.put(new String(name), new String(value));
-            });
-            requestSession.setHeaders(headers);
+        // Please, don't try to send the same headers frame twice...
+        if (streams.containsKey(streamId)) {
+            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
         }
 
-        if (headerFrame.isEndStream()) {
-            state = State.READY_FOR_DISPATCH;
-        }
+        // OK, so we have a new stream. That's great! Let's create a new Http2RequestContext to
+        // handle it. When it is closed, we need to remove it from the map.
+        final var requestCtx = contextReuseManager.checkoutHttp2RequestContext(
+                dispatcher, channel, (id) -> streams.remove(id));
+
+        // Put it in the map
+        streams.put(streamId, requestCtx);
+
+        // NOW initialize it. If we initialize first, the header might be the kind that results in the end of
+        // the stream, embodying the whole request, which would cause the onClose to be called, so we want
+        // to make sure we added things to the map first so it can then be removed
+        requestCtx.handleHeaders(headerFrame);
     }
 
-    private void submitFrame(Frame frame, ConnectionContext channelSession) {
-        final OutputBuffer outputBuffer = channelSession.getOutputBuffer().reset();
-//        frame.
-        channelSession.sendOutputData();
-//        final var handler = requestHandlers.computeIfAbsent(streamId, k -> {
-//            final var h = new Http2RequestHandler(out);
-//            threadPool.execute(h);
-//            return h;
-//        });
-//
-//        handler.submit(frame);
-    }
-
-    private void handleRstStream(ConnectionContext channelSession) throws IOException {
-        final var frame = RstStreamFrame.parse(channelSession.getIn());
-        if (frame.getStreamId() > CONNECTION_STREAM_ID) {
-            submitFrame(frame, channelSession);
-        }
-    }
-
-    private void handlePing(ConnectionContext channelSession) throws IOException {
-        final var frame = PingFrame.parse(channelSession.getIn());
-        if (frame.getStreamId() > CONNECTION_STREAM_ID) {
-            submitFrame(frame, channelSession);
+    /**
+     * Decodes and dispatches the RST_STREAM frame to the appropriate stream. This cannot
+     * refer to the physical connection, only one of the logical connection streams.
+     */
+    private void handleRstStream() {
+        final var frame = RstStreamFrame.parse(in);
+        final var streamId = frame.getStreamId();
+        final var stream = streams.get(streamId);
+        if (stream != null) {
+            stream.handleRstStream(frame.getErrorCode());
         }
     }
 }

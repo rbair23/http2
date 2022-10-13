@@ -4,24 +4,59 @@ import com.hedera.hashgraph.web.ResponseAlreadySentException;
 import com.hedera.hashgraph.web.StatusCode;
 import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.impl.Dispatcher;
-import com.hedera.hashgraph.web.impl.HttpVersion;
+import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.impl.http2.frames.DataFrame;
 import com.hedera.hashgraph.web.impl.http2.frames.HeadersFrame;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
 import com.hedera.hashgraph.web.impl.session.RequestContext;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
+import com.twitter.hpack.Decoder;
 import com.twitter.hpack.Encoder;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.channels.SocketChannel;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 
-public class Http2RequestContext extends RequestContext {
-    private int requestId;
+public final class Http2RequestContext extends RequestContext {
+    /**
+     * The different states supported by the HTTP/2.0 Stream States state machine.
+     * See the specification, Figure 2, and in section 5.1
+     */
+    private enum State {
+        IDLE,
+        OPEN,
+        HALF_CLOSED,
+        CLOSED,
+        RESERVED
+    }
 
-    private Http2ConnectionContext connectionContext;
+    /**
+     * The HTTP/2.0 stream ID associated with this request
+     */
+    private int streamId;
+
+    /**
+     * The current state of this stream.
+     */
+    private State state = State.IDLE;
+
+    /**
+     * A callback to be invoked when the {@link #close()} method is called.
+     */
+    private IntConsumer onClose;
+
+    // TODO I will need the client settings
+
+
+
+
+
 
     // TODO Could reuse requestBody byte[] here but that would mean we need semantics for when you can and can't ready body, ugg
     private final OutputBuffer dataOutputBuffer = new OutputBuffer(
@@ -40,25 +75,37 @@ public class Http2RequestContext extends RequestContext {
     // =================================================================================================================
     // Constructor & Methods
 
-    public Http2RequestContext(ContextReuseManager contextReuseManager, Dispatcher dispatcher) {
+    /**
+     * Create a new instance.
+     *
+     * @param contextReuseManager The {@link ContextReuseManager} that manages this instance. Must not be null.
+     * @param dispatcher The {@link Dispatcher} to use for dispatching requests. Cannot be null.
+     */
+    public Http2RequestContext(final ContextReuseManager contextReuseManager, final Dispatcher dispatcher) {
         super(contextReuseManager, dispatcher);
     }
 
-    Http2RequestContext reset(Http2ConnectionContext connectionContext, int requestId) {
+    /**
+     * Resets the instance prior to use.
+     *
+     * @param onClose A callback to invoke when the context is closed
+     */
+    public void reset(IntConsumer onClose, SocketChannel channel) {
         super.reset();
-        this.requestId = requestId;
-        this.connectionContext = connectionContext;
+        this.channel = channel; // kinda suspicious...
+        this.state = State.IDLE;
+        this.streamId = -1;
+        this.onClose = onClose;
         this.dataOutputBuffer.reset();
         this.frameHeaderBuffer.reset();
-        return this;
     }
 
     private void sendRequestOutputBufferContentsAsLastFrame() {
         try {
             // Create Frame Header
             frameHeaderBuffer.reset();
-            DataFrame.writeHeader(frameHeaderBuffer, requestId, dataOutputBuffer.size());
-            DataFrame.writeLastHeader(frameHeaderBuffer, requestId);
+            DataFrame.writeHeader(frameHeaderBuffer, streamId, dataOutputBuffer.size());
+            DataFrame.writeLastHeader(frameHeaderBuffer, streamId);
             sendFrame();
         } catch (IOException fatalToConnection) {
             fatalToConnection.printStackTrace();
@@ -69,7 +116,7 @@ public class Http2RequestContext extends RequestContext {
         try {
             // Create Frame Header
             frameHeaderBuffer.reset();
-            DataFrame.writeHeader(frameHeaderBuffer, requestId, dataOutputBuffer.size());
+            DataFrame.writeHeader(frameHeaderBuffer, streamId, dataOutputBuffer.size());
             sendFrame();
         } catch (IOException fatalToConnection) {
             fatalToConnection.printStackTrace();
@@ -89,7 +136,7 @@ public class Http2RequestContext extends RequestContext {
 
     // TODO not sure the meaning of this for Http2RequestContext
     @Override
-    public void handle(Consumer<HttpVersion> upgradeConnectionCallback) {}
+    public void handle(Consumer<HttpVersion> onConnectionUpgrade) {}
 
     // =================================================================================================================
     // WebRequest Methods
@@ -131,24 +178,73 @@ public class Http2RequestContext extends RequestContext {
 
     private void sendHeaders() throws IOException {
         // write encoded headers to temp buffer as we need to know the length before we can build the frame
-        final var encoder = new Encoder((int) connectionContext.clientSettings.getHeaderTableSize());
-        dataOutputBuffer.reset();
-        encoder.encodeHeader(dataOutputBuffer, ":status".getBytes(), ("" + responseCode).getBytes(), false);
-        final AtomicReference<IOException> ioException = new AtomicReference<>();
-        responseHeaders.forEach((k, v) -> {
-            try {
-                encoder.encodeHeader(dataOutputBuffer, k.getBytes(), v.getBytes(), false);
-            } catch (IOException e) {
-                ioException.set(e);
-            }
-        });
-        final var e = ioException.get();
-        if (e != null) {
-            throw e;
-        } else {
-            frameHeaderBuffer.reset();
-            HeadersFrame.writeHeader(frameHeaderBuffer, requestId, dataOutputBuffer.size());
-            sendFrame();
+//        final var encoder = new Encoder((int) connectionContext.clientSettings.getHeaderTableSize());
+//        dataOutputBuffer.reset();
+//        encoder.encodeHeader(dataOutputBuffer, ":status".getBytes(), ("" + responseCode).getBytes(), false);
+//        final AtomicReference<IOException> ioException = new AtomicReference<>();
+//        responseHeaders.forEach((k, v) -> {
+//            try {
+//                encoder.encodeHeader(dataOutputBuffer, k.getBytes(), v.getBytes(), false);
+//            } catch (IOException e) {
+//                ioException.set(e);
+//            }
+//        });
+//        final var e = ioException.get();
+//        if (e != null) {
+//            throw e;
+//        } else {
+//            frameHeaderBuffer.reset();
+//            HeadersFrame.writeHeader(frameHeaderBuffer, requestId, dataOutputBuffer.size());
+//            sendFrame();
+//        }
+    }
+
+    public void handleHeaders(HeadersFrame headerFrame) {
+        // set the request id, and get all the header data decoded, and so forth.
+        streamId = headerFrame.getStreamId();
+//        if (headerFrame.isCompleteHeader()) {
+//            // I have all the bytes I will need... so I can go and decode them
+//            final var decoder = new Decoder(
+//                    (int) serverSettings.getMaxHeaderListSize(),
+//                    (int) serverSettings.getHeaderTableSize());
+//
+//            final var headers = new WebHeaders();
+//            decoder.decode(new ByteArrayInputStream(headerFrame.getFieldBlockFragment()), (name, value, sensitive) -> {
+//                // sensitive is a boolean
+//                headers.put(new String(name), new String(value));
+//            });
+//            requestSession.setHeaders(headers);
+//        }
+//
+//        if (headerFrame.isEndStream()) {
+//            state = Http2ConnectionContext.State.READY_FOR_DISPATCH;
+//        }
+
+        /*
+                        // Go forth and handle. Good luck.
+                        final var requestHeaders = requestSession.getHeaders();
+                        requestSession.setPath(requestHeaders.get(":path"));
+                        requestSession.setMethod(requestHeaders.get(":method"));
+                        requestSession.setVersion("HTTP/2.0");
+                        final var webRequest = new WebRequestImpl(requestSession, );
+                        doDispatch.accept(channelSession, webRequest);
+                        state = State.DISPATCHING;
+                        return;
+
+         */
+    }
+
+    @Override
+    public void close() {
+        super.close();
+        if (onClose != null) {
+            onClose.accept(streamId);
         }
+        streamId = -1;
+    }
+
+    public void handleRstStream(Http2ErrorCode errorCode) {
+        System.out.println("RST_STREAM: " + errorCode.name());
+        close();
     }
 }

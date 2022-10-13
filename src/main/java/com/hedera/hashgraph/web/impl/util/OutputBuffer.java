@@ -128,4 +128,8 @@ public class OutputBuffer extends OutputStream {
         buffer.putInt((int) ((value >>> 8) & 0xFF));
         buffer.putInt((int) (value & 0XFF));
     }
+
+    public void write64BitLong(long pingData) {
+        buffer.putLong(pingData);
+    }
 }

@@ -1,6 +1,6 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
-import com.hedera.hashgraph.web.impl.HttpInputStream;
+import com.hedera.hashgraph.web.impl.util.HttpInputStream;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 import java.io.IOException;
@@ -201,10 +201,8 @@ public abstract class Frame {
      * @param type The frame type
      * @param flags The flags
      * @param streamId The stream id
-     * @throws IOException If there is a problem writing to the stream
      */
-    static void writeHeader(final OutputBuffer out, int payloadLength, FrameType type, byte flags, int streamId)
-            throws IOException {
+    static void writeHeader(final OutputBuffer out, int payloadLength, FrameType type, byte flags, int streamId) {
         out.write24BitInteger(payloadLength);
         out.writeByte(type.ordinal());
         out.writeByte(flags);

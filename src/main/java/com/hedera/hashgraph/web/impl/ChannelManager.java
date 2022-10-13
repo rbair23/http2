@@ -11,9 +11,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 
 /**
- * Manages the set of all open connections on a single {@link ServerSocketChannel}.
+ * Manages the set of all open connections on a single {@link ServerSocketChannel}. Listens to "accept"
+ * and "read ready" NIO events.
  */
-public final class ChannelManager {
+public final class ChannelManager implements AutoCloseable {
     /**
      * This is the channel we will be listening for connections on
      */
@@ -36,7 +37,7 @@ public final class ChannelManager {
     private final boolean noDelay;
 
     /**
-     * Flag set by the {@link #shutdown()} method, generally by a different thread, to interrupt any
+     * Flag set by the {@link #close()} method, generally by a different thread, to interrupt any
      * processing this class may be doing, and to interrupt the {@link #selector}.
      */
     private volatile boolean shutdown = false;
@@ -62,7 +63,7 @@ public final class ChannelManager {
      * Threadsafe method to terminate any processing being done by this class and interrupt
      * the {@link #checkConnections(Duration, AtomicInteger, Predicate)} method, if it is blocking.
      */
-    public void shutdown() {
+    public void close() {
         this.shutdown = true;
 
         // Call the selector just to process the canceled keys (see ServerImpl.java)
@@ -83,7 +84,7 @@ public final class ChannelManager {
      * <p>
      * If there are no connections, or all connections are idle, then the method will block until the {@code timeout}
      * has expired. This blocking operation may be interrupted with {@link Thread#interrupt()}. Calling the
-     * {@link #shutdown()} method will also interrupt this blocking operation, but should only be used when you are
+     * {@link #close()} method will also interrupt this blocking operation, but should only be used when you are
      * done with this instance.
      *
      * @param timeout Specifies the duration of time to block while waiting for events on idle connections.

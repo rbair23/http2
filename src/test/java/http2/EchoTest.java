@@ -23,7 +23,7 @@ class EchoTest {
         WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
         server.getRoutes().get("/echo", req -> {
             assertEquals("GET", req.getMethod());
-            assertEquals("HTTP/2.0", req.getProtocol());
+            assertEquals("HTTP/2.0", req.getVersion());
             assertEquals("/echo", req.getPath());
 
             final var responseBody = "Hello World!";

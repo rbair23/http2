@@ -64,6 +64,12 @@ public final class WebRoutes {
         routes.remove(routeToRemove.method() + "-" + routeToRemove.path());
     }
 
+    public void removeRoute(String method, String path) throws IllegalArgumentException {
+        Objects.requireNonNull(method);
+        Objects.requireNonNull(path);
+        routes.remove(method + "-" + method);
+    }
+
     public WebRequestHandler match(String method, String path) {
         final var m = method.toUpperCase();
         final var key = m + "-" + path;

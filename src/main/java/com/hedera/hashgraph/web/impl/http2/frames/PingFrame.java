@@ -1,8 +1,9 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
-import com.hedera.hashgraph.web.impl.HttpInputStream;
+import com.hedera.hashgraph.web.impl.util.HttpInputStream;
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Exception;
+import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 import java.io.IOException;
 
@@ -50,9 +51,9 @@ public final class PingFrame extends Frame {
      * at the time this method is called.
      *
      * @param in The input stream. Cannot be null.
-     * @return A decoded {@link PingFrame}.
+     * @return The ping frame's data
      */
-    public static PingFrame parse(HttpInputStream in) {
+    public static long parseData(HttpInputStream in) {
         // Read off the frame length. This *MUST* be 8 bytes, exactly.
         final var frameLength = in.read24BitInteger();
         if (frameLength != 8) {
@@ -76,8 +77,12 @@ public final class PingFrame extends Frame {
         // Read off the data, which is some arbitrary 8 bytes. We can read that as a long,
         // so we do so, because it is cheap and easy to represent on the computer (but
         // it does take longer to decode, so I'm not totally sold on the approach).
-        final var data = in.read64BitLong();
-
-        return new PingFrame(flags, data);
+        return in.read64BitLong();
     }
+
+    public static void writeAck(OutputBuffer outputBuffer, long pingData) {
+        Frame.writeHeader(outputBuffer, 8, FrameType.PING, (byte) 0x1, 0);
+        outputBuffer.write64BitLong(pingData);
+    }
+
 }

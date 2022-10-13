@@ -14,15 +14,15 @@ public final class Settings {
     public static final int DEFAULT_MAX_HEADER_FRAME_SIZE = Integer.MAX_VALUE;
     public static final int DEFAULT_MAX_FRAME_SIZE = INITIAL_FRAME_SIZE;
 
-    private long headerTableSize = DEFAULT_HEADER_TABLE_SIZE;
-    private boolean enablePush = DEFAULT_ENABLE_PUSH;
-    private long maxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
-    private long initialWindowSize = DEFAULT_INITIAL_WINDOW_SIZE;
-    private int maxFrameSize = INITIAL_FRAME_SIZE;
-    private long maxHeaderListSize = DEFAULT_MAX_HEADER_FRAME_SIZE;
+    private long headerTableSize;
+    private boolean enablePush;
+    private long maxConcurrentStreams;
+    private long initialWindowSize;
+    private int maxFrameSize;
+    private long maxHeaderListSize;
 
     public Settings() {
-
+        resetToDefaults();
     }
 
     public long getHeaderTableSize() {
@@ -71,5 +71,14 @@ public final class Settings {
 
     public void setMaxHeaderListSize(long maxHeaderListSize) {
         this.maxHeaderListSize = maxHeaderListSize;
+    }
+
+    public void resetToDefaults() {
+        headerTableSize = DEFAULT_HEADER_TABLE_SIZE;
+        enablePush = DEFAULT_ENABLE_PUSH;
+        maxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
+        initialWindowSize = DEFAULT_INITIAL_WINDOW_SIZE;
+        maxFrameSize = INITIAL_FRAME_SIZE;
+        maxHeaderListSize = DEFAULT_MAX_HEADER_FRAME_SIZE;
     }
 }

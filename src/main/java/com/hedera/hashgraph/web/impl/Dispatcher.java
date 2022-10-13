@@ -10,11 +10,10 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
 /**
- * The {@code Dispatcher} coordinates the work of the {@link ChannelManager} (which handles all networking
- * connections with the clients), the {@link ProtocolBase}s, and the data buffers used by the protocol
- * handlers. It also manages the {@link ExecutorService} (or thread pool) to which
- * {@link WebRequest}s are sent. There is a single instance of this class per
- * running {@link com.hedera.hashgraph.web.WebServer}, and it executes on a single thread.
+ * The {@code Dispatcher} is responsible for dispatching a {@link WebRequest} to a
+ * {@link com.hedera.hashgraph.web.WebRoute}, if one is available that matches the path of the {@link WebRequest}.
+ * It uses a thread in the provided {@link ExecutorService} to execute the request, blocking if there are
+ * not any available threads.
  */
 public final class Dispatcher {
 
@@ -22,7 +21,6 @@ public final class Dispatcher {
      * The web server routes. This will never be null.
      */
     private final WebRoutes routes;
-
 
     /**
      * A thread pool for submitting work for dispatching for web handlers. This will never be null.
@@ -43,7 +41,6 @@ public final class Dispatcher {
     /**
      * Called to dispatch a web request to be handled
      *
-     * @param channelSession The {@link ConnectionContext} instance associated with the request to dispatch. Not null or closed.
      * @param webRequest The {@link WebRequest} to dispatch. Not null or closed.
      */
     public void dispatch(WebRequest webRequest) {

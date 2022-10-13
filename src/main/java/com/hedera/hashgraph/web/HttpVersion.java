@@ -1,4 +1,4 @@
-package com.hedera.hashgraph.web.impl;
+package com.hedera.hashgraph.web;
 
 import java.nio.charset.StandardCharsets;
 

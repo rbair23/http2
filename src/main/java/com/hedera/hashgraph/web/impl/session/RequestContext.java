@@ -1,16 +1,14 @@
 package com.hedera.hashgraph.web.impl.session;
 
+import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.StatusCode;
 import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.WebRequest;
 import com.hedera.hashgraph.web.impl.Dispatcher;
-import com.hedera.hashgraph.web.impl.HttpVersion;
-import com.hedera.hashgraph.web.impl.ProtocolBase;
 import com.hedera.hashgraph.web.impl.util.ReusableByteArrayInputStream;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 
 public abstract class RequestContext extends ConnectionContext implements WebRequest {
 
@@ -18,17 +16,17 @@ public abstract class RequestContext extends ConnectionContext implements WebReq
     // Request Data
 
     /**
-     * Parsed from the input stream by the {@link ProtocolBase} and set here.
+     * Parsed from the input stream.
      */
     protected String method;
 
     /**
-     * Parsed from the input stream by the {@link ProtocolBase} and set here.
+     * Parsed from the input stream.
      */
     protected String path;
 
     /**
-     * Parsed from the input stream by the {@link ProtocolBase} and set here.
+     * Parsed from the input stream.
      */
     protected HttpVersion version;
 
@@ -51,8 +49,8 @@ public abstract class RequestContext extends ConnectionContext implements WebReq
     // =================================================================================================================
     // ConnectionContext Methods
 
-    public RequestContext(ContextReuseManager contextReuseManager, Dispatcher dispatcher) {
-        super(contextReuseManager, dispatcher);
+    protected RequestContext(ContextReuseManager contextReuseManager, Dispatcher dispatcher) {
+        super(contextReuseManager, dispatcher, 16*1024);
     }
 
     @Override
@@ -95,8 +93,8 @@ public abstract class RequestContext extends ConnectionContext implements WebReq
     }
 
     @Override
-    public String getProtocol() {
-        return version.name();
+    public HttpVersion getVersion() {
+        return version;
     }
 
     @Override

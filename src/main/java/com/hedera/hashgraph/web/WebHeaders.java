@@ -44,6 +44,20 @@ public final class WebHeaders {
         headers.clear();
     }
 
+    public List<String> getAsList(String key) {
+        final var value = headers.get(key);
+        if (value == null) {
+            return null;
+        }
+
+        final List<String> list = new ArrayList<>();
+        final var elements = value.split(",");
+        for (var element : elements) {
+            list.add(element.trim());
+        }
+        return list;
+    }
+
     public void forEach(BiConsumer<String, String> callback) {
         headers.forEach(callback);
     }

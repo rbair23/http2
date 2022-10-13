@@ -10,17 +10,26 @@ import java.net.ServerSocket;
 import java.nio.channels.ServerSocketChannel;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * A simple web server supporting both HTTP/1.1 and HTTP/2 requests.
+ * A simple web server supporting both HTTP/1.1 and HTTP/2.0 requests. The server architecture is designed to
+ * use minimal object allocation, configurable numbers of threads, and to minimize buffer copies. It is not
+ * designed to support large request bodies, but does support arbitrarily sized response bodies.
  * <p>
- * The implementation of HTTP/2 is based on <a href="https://httpwg.org/specs/rfc9113">RFC9113</a> and does not
+ * The server can be started at most once. It cannot be restarted.
+ * <p>
+ * The implementation of HTTP/2.0 is based on <a href="https://httpwg.org/specs/rfc9113">RFC9113</a> and does not
  * implement the deprecated priority signaling scheme defined in
  * <a href="https://httpwg.org/specs/rfc9113.html#RFC7540">RFC7540</a>.
  * <p>
- * This implementation of HTTP/2 does not support PUSH_PROMISE or server side push in general at this time.
+ * This implementation of HTTP/2.0 does not support PUSH_PROMISE or server side push in general at this time.
  */
 public final class WebServer {
+
+    /**
+     * The server lifecycle.
+     */
     private enum Lifecycle {
         NOT_STARTED,
         STARTED,
@@ -32,6 +41,12 @@ public final class WebServer {
      * The port number to use if you want the server to choose an ephemeral port at random. Great for testing.
      */
     public static final int EPHEMERAL_PORT = 0;
+
+    /**
+     * An incrementing counter, increased by one for each WebServer started. Used for debugging, but otherwise
+     * it is unused.
+     */
+    private static AtomicInteger AUTO_INC_COUNTER = new AtomicInteger(0);
 
     /**
      * Configuration settings for the web server. Once set, the configuration cannot be changed.
@@ -53,30 +68,16 @@ public final class WebServer {
     //-------------- All fields below are related to a running server only
 
     /**
-     * A factory for a {@link ServerSocket} used for handling client connections. The instance is
+     * The server-side socket channel used for communication with the client. The instance is
      * created when the server is started.
      */
     private ServerSocketChannel ssc;
 
     /**
-     *  A factory for creating new connections with clients. Created when the server is started.
+     * Handles incoming data from the {@link #ssc} by distributing it to various implementation
+     * classes that will process that data and eventually create a request to be handled by a route.
      */
-    private ServerSocket serverSocket;
-
-    /**
-     * The dispatcher is responsible for processing all connections and their data and
-     * eventually dispatching web requests to the appropriate {@link WebRequestHandler}.
-     * The instance is created during server {@link #start()} and cleared when the server
-     * is stopped.
-     */
-    private Dispatcher dispatcher;
-
     private IncomingDataHandler incomingDataHandler;
-
-    /**
-     * Responsible for managing connections.
-     */
-    private ChannelManager channelManager;
 
     /**
      * This thread is used for running the dispatcher. It is created on {@link #start()}
@@ -126,19 +127,22 @@ public final class WebServer {
             throw new IllegalStateException("Server has already been started");
         }
 
+        // Use this version number in debugging contexts.
+        final int versionNumber = AUTO_INC_COUNTER.incrementAndGet();
+
         // Create and configure the server socket channel to be non-blocking (NIO)
         this.ssc = ServerSocketChannel.open();
         ssc.configureBlocking(false);
 
         // Bind the socket
-        this.serverSocket = ssc.socket();
+        final ServerSocket serverSocket = ssc.socket();
         serverSocket.bind(config.addr(), config.backlog());
 
         // Create and start the dang thread
-        this.channelManager = new ChannelManager(ssc, config.noDelay());
-        this.dispatcher = new Dispatcher(routes, config.executor());
+        final var dispatcher = new Dispatcher(routes, config.executor());
+        final var channelManager = new ChannelManager(ssc, config.noDelay());
         this.incomingDataHandler = new IncomingDataHandler(config, dispatcher, channelManager);
-        this.incomingDataHandlerThread = new Thread(incomingDataHandler, "WEB-Incoming-Data-Handler");
+        this.incomingDataHandlerThread = new Thread(incomingDataHandler, "WebServer-" + versionNumber);
         lifecycle = Lifecycle.STARTED;
         this.incomingDataHandlerThread.start();
     }
@@ -162,8 +166,7 @@ public final class WebServer {
 
 //        this.selector.wakeup();
         config.executor().shutdown();
-        channelManager.shutdown();
-        incomingDataHandler.shutdown();
+        incomingDataHandler.close();
 //        // TODO Replace the use of System.currentTimeMillis with something like from platform that
 //        //      lets me fake out the time for testing purposes.
 //        long latest = System.currentTimeMillis() + delay * 1000L;
@@ -218,8 +221,6 @@ public final class WebServer {
     public WebServerConfig getConfig() {
         return config;
     }
-
-    // Only has a valid value if bound (i.e. if the server has been started).
 
     /**
      * Gets the bound {@link InetSocketAddress}. Until the server is started, this method will
