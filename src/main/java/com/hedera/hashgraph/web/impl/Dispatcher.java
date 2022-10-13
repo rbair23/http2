@@ -4,7 +4,6 @@ import com.hedera.hashgraph.web.ResponseAlreadySentException;
 import com.hedera.hashgraph.web.StatusCode;
 import com.hedera.hashgraph.web.WebRequest;
 import com.hedera.hashgraph.web.WebRoutes;
-import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
@@ -57,7 +56,7 @@ public final class Dispatcher {
                     // Oh dang, some exception happened while handling the request. Oof. Well, somebody
                     // needs to send a 500 error.
                     try {
-                        webRequest.respond(StatusCode.INTERNAL_SERVER_ERROR);
+                        webRequest.respond(StatusCode.INTERNAL_SERVER_ERROR_500);
                     } catch (ResponseAlreadySentException e) {
                         throw new RuntimeException(e);
                     }
@@ -67,7 +66,7 @@ public final class Dispatcher {
         } else {
             // Dude, 404
             try {
-                webRequest.respond(StatusCode.NOT_FOUND);
+                webRequest.respond(StatusCode.NOT_FOUND_404);
             } catch (ResponseAlreadySentException e) {
                 throw new RuntimeException(e);
             }

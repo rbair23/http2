@@ -40,7 +40,7 @@ public class GrpcRouter {
 
         final var method = req.getMethod();
         if (!"POST".equals(method)) {
-            req.respond(StatusCode.METHOD_NOT_ALLOWED);
+            req.respond(StatusCode.METHOD_NOT_ALLOWED_405);
             return;
         }
 
@@ -55,10 +55,10 @@ public class GrpcRouter {
         GrpcMethod grpcMethod;
         if (path == null) {
             // HTTP StatusCode.NOT_FOUND
-            req.respond(StatusCode.NOT_FOUND);
+            req.respond(StatusCode.NOT_FOUND_404);
             return;
         } else if (!path.startsWith(pathPrefix + "/")) {
-            req.respond(StatusCode.NOT_FOUND);
+            req.respond(StatusCode.NOT_FOUND_404);
             return;
         } else {
             // Parse out the service name
@@ -67,7 +67,7 @@ public class GrpcRouter {
 
             final var grpcService = services.get(serviceNameInPath);
             if (grpcService == null) {
-                req.respond(StatusCode.NOT_FOUND);
+                req.respond(StatusCode.NOT_FOUND_404);
                 return;
             }
 
@@ -75,7 +75,7 @@ public class GrpcRouter {
             final var methodName = pathAfterPrefix.substring(pathAfterPrefix.indexOf('/') + 1);
             grpcMethod = grpcService.method(methodName);
             if (grpcMethod == null) {
-                req.respond(StatusCode.NOT_FOUND);
+                req.respond(StatusCode.NOT_FOUND_404);
                 return;
             }
         }
@@ -91,7 +91,7 @@ public class GrpcRouter {
         if (te != null && !te.contains("trailers")) {
             // SPEC: "te" "trailers" # Used to detect incompatible proxies
             // HTTP StatusCode.BAD_REQUEST Bad Request
-            req.respond(StatusCode.BAD_REQUEST);
+            req.respond(StatusCode.BAD_REQUEST_400);
             return;
         }
 
@@ -100,13 +100,13 @@ public class GrpcRouter {
         if (timeout != null) {
             if (timeout.size() != 3) {
                 // HTTP StatusCode.BAD_REQUEST Bad Request
-                req.respond(StatusCode.BAD_REQUEST);
+                req.respond(StatusCode.BAD_REQUEST_400);
                 return;
             }
 
             if (!"grpc-timeout".equals(timeout.get(0))) {
                 // HTTP StatusCode.BAD_REQUEST Bad Request
-                req.respond(StatusCode.BAD_REQUEST);
+                req.respond(StatusCode.BAD_REQUEST_400);
                 return;
             }
 
@@ -114,7 +114,7 @@ public class GrpcRouter {
             if (timeoutValueString.length() > 8) {
                 // SPEC: positive integer as ASCII string of at most 8 digits
                 // HTTP StatusCode.BAD_REQUEST Bad Request
-                req.respond(StatusCode.BAD_REQUEST);
+                req.respond(StatusCode.BAD_REQUEST_400);
                 return;
             }
 
@@ -124,7 +124,7 @@ public class GrpcRouter {
             } catch (NumberFormatException ex) {
                 // SPEC: positive integer as ASCII string of at most 8 digits
                 // HTTP StatusCode.BAD_REQUEST Bad Request
-                req.respond(StatusCode.BAD_REQUEST);
+                req.respond(StatusCode.BAD_REQUEST_400);
                 return;
             }
 
@@ -142,7 +142,7 @@ public class GrpcRouter {
             if (t == null) {
                 // Bad timeout unit, so bad request.
                 // HTTP StatusCode.BAD_REQUEST Bad Request
-                req.respond(StatusCode.BAD_REQUEST);
+                req.respond(StatusCode.BAD_REQUEST_400);
                 return;
             }
         }
@@ -153,7 +153,7 @@ public class GrpcRouter {
             // If Content-Type does not begin with "application/grpc", gRPC servers SHOULD respond with
             // HTTP status of StatusCode.UNSUPPORTED_MEDIA_TYPE (Unsupported Media Type). This will prevent other HTTP/2 clients from
             // interpreting a gRPC error response, which uses status 200 (OK), as successful.
-            req.respond(StatusCode.UNSUPPORTED_MEDIA_TYPE);
+            req.respond(StatusCode.UNSUPPORTED_MEDIA_TYPE_415);
             return;
         }
 
@@ -161,18 +161,18 @@ public class GrpcRouter {
         String contentCoding;
         if (messageEncoding != null) {
             if (messageEncoding.size() != 2) {
-                req.respond(StatusCode.BAD_REQUEST);
+                req.respond(StatusCode.BAD_REQUEST_400);
                 return;
             }
 
             if (!"grpc-encoding".equals(messageEncoding.get(0))) {
-                req.respond(StatusCode.BAD_REQUEST);
+                req.respond(StatusCode.BAD_REQUEST_400);
                 return;
             }
 
             contentCoding = messageEncoding.get(1);
             if (!("identity".equals(contentCoding) || "gzip".equals(contentCoding) || "deflate".equals(contentCoding) || "snappy".equals(contentCoding))) {
-                req.respond(StatusCode.BAD_REQUEST);
+                req.respond(StatusCode.BAD_REQUEST_400);
                 return;
             }
         }
@@ -181,18 +181,18 @@ public class GrpcRouter {
         final List<String> acceptableEncodings;
         if (messageAcceptEncoding != null) {
             if (messageAcceptEncoding.size() < 2) {
-                req.respond(StatusCode.BAD_REQUEST);
+                req.respond(StatusCode.BAD_REQUEST_400);
                 return;
             }
 
             if (!"grpc-accept-encoding".equals(messageAcceptEncoding.get(0))) {
-                req.respond(StatusCode.BAD_REQUEST);
+                req.respond(StatusCode.BAD_REQUEST_400);
                 return;
             }
 
             acceptableEncodings = new ArrayList<>(messageAcceptEncoding.subList(1, messageAcceptEncoding.size()));
             if (!(acceptableEncodings.contains("identity") || acceptableEncodings.contains("gzip") || acceptableEncodings.contains("deflate") || acceptableEncodings.contains("snappy"))) {
-                req.respond(StatusCode.UNSUPPORTED_MEDIA_TYPE);
+                req.respond(StatusCode.UNSUPPORTED_MEDIA_TYPE_415);
                 return;
             }
         }
@@ -209,7 +209,7 @@ public class GrpcRouter {
                 @Override
                 public OutputStream startResponse(GrpcStatus status) throws IOException {
                     // TODO gotta do some more work on this...
-                    return req.startResponse(StatusCode.OK, WebRequest.EMPTY_HEADERS);
+                    return req.startResponse(StatusCode.OK_200, WebRequest.EMPTY_HEADERS);
                 }
             });
         } catch (GrpcException e) {

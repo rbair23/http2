@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
+import java.text.ParseException;
 import java.util.Arrays;
 
 /**
@@ -282,7 +283,7 @@ public final class HttpInputStream {
         if (majorChar == '1' && minorChar == '0') return HttpVersion.HTTP_1;
         if (majorChar == '1' && minorChar == '1') return HttpVersion.HTTP_1_1;
         if (majorChar == '2' && minorChar == '0') return HttpVersion.HTTP_2;
-        throw new RuntimeException();
+        return null;
     }
 
     /**

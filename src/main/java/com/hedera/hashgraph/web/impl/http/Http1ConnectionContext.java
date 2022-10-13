@@ -15,6 +15,12 @@ import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
 
+/**
+ * The HTTP 1.1 spec is vast, there are a number of things not supported here. Bellow is a list of them:
+ * <ul>
+ *     <li><a href="https://httpwg.org/specs/rfc9110.html#trailer.fields">Trailer Fields</a></li>
+ * </ul>
+ */
 public class Http1ConnectionContext extends RequestContext {
     private static final int MAX_METHOD_LENGTH = 1024;
     private static final int MAX_URI_LENGTH = 2024;
@@ -29,10 +35,13 @@ public class Http1ConnectionContext extends RequestContext {
     /** The last bit of HTTP2 preface after "PRI * HTTP/2.0" */
     private static final byte[] HTTP2_PREFACE_END = "\r\nSM\r\n\r\n".getBytes();
 
+    /** States for parser state machine */
     private enum State {BEGIN,METHOD,URI,VERSION,HTTP2_PREFACE,HEADER_KEY,HEADER_VALUE,COLLECTING_BODY};
 
+    /** Parsing state machine current state */
     private State state;
 
+    /** Temporary string used during parsing to hold a header key until we finish parsing its value */
     private String tempHeaderKey;
 
     /**
@@ -97,11 +106,20 @@ public class Http1ConnectionContext extends RequestContext {
                                 // we found a space, so read between mark and current position as string
                                 final int bytesRead = in.resetToMark();
                                 version = in.readVersion();
+                                // check for unknown version
+                                if (version == null) {
+                                    respond(StatusCode.HTTP_VERSION_NOT_SUPPORTED_505);
+                                    return;
+                                }
                                 // skip over the new line
                                 in.skip(2);
                                 // handle versions
                                 switch (version) {
-                                    case HTTP_1, HTTP_1_1 -> {
+                                    case HTTP_1 -> {
+                                        sendUpgradeRequired();
+                                        return;
+                                    }
+                                    case HTTP_1_1 -> {
                                         // next state
                                         in.mark();
                                         state = State.HEADER_KEY;
@@ -113,7 +131,7 @@ public class Http1ConnectionContext extends RequestContext {
                                     }
                                 }
                             } catch (Exception e) {
-                                respond(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
+                                respond(StatusCode.HTTP_VERSION_NOT_SUPPORTED_505);
                                 return;
                             }
                         }
@@ -122,7 +140,7 @@ public class Http1ConnectionContext extends RequestContext {
                         if (in.available(HTTP2_PREFACE_END.length)) {
                             for (final byte b : HTTP2_PREFACE_END) {
                                 if (in.readByte() != b) {
-                                    respond(StatusCode.BAD_REQUEST);
+                                    respond(StatusCode.BAD_REQUEST_400);
                                     return;
                                 }
                             }
@@ -144,7 +162,7 @@ public class Http1ConnectionContext extends RequestContext {
                                     state = State.COLLECTING_BODY;
                                     System.out.println("requestData.getHeaders() = " + requestHeaders);
                                 } else {
-                                    respond(StatusCode.BAD_REQUEST);
+                                    respond(StatusCode.BAD_REQUEST_400);
                                 }
                             }
                         }
@@ -205,7 +223,7 @@ public class Http1ConnectionContext extends RequestContext {
     // =================================================================================================================
     // Parsing Util Methods
 
-    private boolean searchForSpace(int maxLengthToSearch) {
+    private boolean searchForSpace(final int maxLengthToSearch) {
         while(in.getNumMarkedBytes() <= maxLengthToSearch && in.available(1)) {
             final char c = (char)in.peekByte();
             if (c == SPACE) {
@@ -216,7 +234,7 @@ public class Http1ConnectionContext extends RequestContext {
         return false;
     }
 
-    private boolean searchForEndOfLine(int maxLengthToSearch) throws ResponseAlreadySentException {
+    private boolean searchForEndOfLine(final int maxLengthToSearch) throws ResponseAlreadySentException {
         while(in.getNumMarkedBytes() <= maxLengthToSearch && in.available(2)) {
             final char c1 = (char)in.peekByte();
             final char c2 = (char)in.peekByte(1);
@@ -226,7 +244,7 @@ public class Http1ConnectionContext extends RequestContext {
                     // all good we now have a complete start line
                     return true;
                 } else {
-                    respond(StatusCode.BAD_REQUEST);
+                    respond(StatusCode.BAD_REQUEST_400);
                     return false;
                 }
             }
@@ -243,7 +261,7 @@ public class Http1ConnectionContext extends RequestContext {
      * @param maxLengthToSearch maximum number of char's to read ahead searching for separator
      * @return true of field separator was found
      */
-    private boolean searchForHeaderSeparator(int maxLengthToSearch) {
+    private boolean searchForHeaderSeparator(final int maxLengthToSearch) {
         while(in.getNumMarkedBytes() <= maxLengthToSearch && in.available(1)) {
             final char c = (char)in.peekByte();
             if (c == COLON) {
@@ -254,6 +272,17 @@ public class Http1ConnectionContext extends RequestContext {
         return false;
     }
 
+
+    // =================================================================================================================
+    // Utility Methods
+
+    private void sendUpgradeRequired() {
+        final WebHeaders webHeaders = new WebHeaders();
+        webHeaders.put("Upgrade","HTTP/1.1, HTTP/2.0");
+        webHeaders.put("Connection","Upgrade");
+        respond(StatusCode.UPGRADE_REQUIRED_426, webHeaders,
+                "This service requires use of the HTTP/1.1 or HTTP/2.0 protocol.");
+    }
 
     // =================================================================================================================
     // WebRequest Methods
@@ -274,9 +303,29 @@ public class Http1ConnectionContext extends RequestContext {
     @Override
     public void respond(StatusCode statusCode, WebHeaders responseHeaders) throws ResponseAlreadySentException {
         responseCode = statusCode;
-        responseHeaders = requestHeaders;
+        this.responseHeaders = responseHeaders;
         try {
             sendHeader();
+        } catch (IOException e) {
+            e.printStackTrace(); // TODO not sure here
+        }
+    }
+
+    public void respond(StatusCode statusCode, WebHeaders responseHeaders, String plainTextBody)
+            throws ResponseAlreadySentException {
+        try {
+            responseCode = statusCode;
+            this.responseHeaders = responseHeaders;
+            byte[] contentBytes = plainTextBody.getBytes(StandardCharsets.US_ASCII);
+            responseHeaders.setContentLength(contentBytes.length);
+            responseHeaders.setContentType("text/plain");
+            sendHeader();
+            // send body
+            outputBuffer.reset();
+            outputBuffer.write(contentBytes);
+            outputBuffer.write(CR);
+            outputBuffer.write(LF);
+            outputBuffer.sendContentsToChannel(channel);
         } catch (IOException e) {
             e.printStackTrace(); // TODO not sure here
         }
@@ -300,7 +349,7 @@ public class Http1ConnectionContext extends RequestContext {
         // send response line
         outputBuffer.write(version.versionString());
         outputBuffer.write(SPACE);
-        outputBuffer.write(Integer.toString(responseCode.code));
+        outputBuffer.write(Integer.toString(responseCode.code()));
         outputBuffer.write(SPACE);
         outputBuffer.write(responseCode.name());
         outputBuffer.write(CR);

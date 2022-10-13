@@ -32,7 +32,7 @@ class EchoTest {
                     .setContentEncoding(WebHeaders.CONTENT_ENCODING_GZIP)
                     .setServer("EchoTest");
 
-            try (var out = req.startResponse(StatusCode.OK, responseHeaders)) {
+            try (var out = req.startResponse(StatusCode.OK_200, responseHeaders)) {
                 out.write(responseBody.getBytes());
             } catch (IOException | ResponseAlreadySentException exception) {
                 fail(exception);
