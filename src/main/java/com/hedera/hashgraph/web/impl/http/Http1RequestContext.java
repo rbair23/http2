@@ -122,6 +122,8 @@ class Http1RequestContext extends RequestContext {
             outputBuffer.write(CR);
             outputBuffer.write(LF);
         });
+        outputBuffer.write(CR);
+        outputBuffer.write(LF);
         outputBuffer.sendContentsToChannel(channel);
     }
 
@@ -156,11 +158,11 @@ class Http1RequestContext extends RequestContext {
 
     @Override
     public void respond(StatusCode statusCode, WebHeaders responseHeaders) throws ResponseAlreadySentException {
-        respond(statusCode, responseHeaders, statusCode.message());
+        respond(statusCode, responseHeaders, statusCode.code()+" - "+statusCode.message());
     }
 
     @Override
     public void respond(StatusCode statusCode) throws ResponseAlreadySentException {
-        respond(statusCode, new WebHeaders(), statusCode.message());
+        respond(statusCode, new WebHeaders(), statusCode.code()+" - "+statusCode.message());
     }
 }

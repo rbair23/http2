@@ -35,7 +35,7 @@ public class Http1ConnectionContext extends ConnectionContext {
         HTTP2_PREFACE,
         HEADER_KEY,
         HEADER_VALUE,
-        START_OF_BODY,
+        WAITING_FOR_END_OF_REQUEST_BODY,
         WAITING_FOR_RESPONSE_TO_BE_SENT
     };
 
@@ -85,6 +85,7 @@ public class Http1ConnectionContext extends ConnectionContext {
         // loop while there is still data to process, we can go through multiple states
         try {
             while (inputBuffer.available(1)) {
+                System.out.println("state = " + state);
                 switch (state) {
                     case BEGIN:
                         inputBuffer.mark();
@@ -174,15 +175,31 @@ public class Http1ConnectionContext extends ConnectionContext {
                     case HEADER_KEY:
                         // check for end of headers with a double new line
                         if (inputBuffer.available(2)) {
+                            System.out.println("inputBuffer.peekByte()+inputBuffer.peekByte(1) = " + inputBuffer.peekByte()+inputBuffer.peekByte(1));
                             // look ahead for end of line
                             if ((char) inputBuffer.peekByte() == CR) {
                                 if ((char) inputBuffer.peekByte(1) == LF) {
+                                    System.out.println("END OF HEADERS");
                                     // we have handled the next to chars so move ahead
                                     inputBuffer.skip(2);
                                     // we are now ready for body
                                     inputBuffer.mark();
-                                    state = State.START_OF_BODY;
                                     System.out.println("requestContext.getRequestHeaders() = " + requestContext.getRequestHeaders());
+                                    // check if there is a request body to read
+                                    final int bodySize = requestContext.getRequestHeaders().getContentLength();
+                                    System.out.println("bodySize = " + bodySize);
+                                    if (bodySize > 0) {
+                                        if (inputBuffer.available(bodySize)) {
+                                            requestContext.setRequestBody(new BodyInputStream(inputBuffer, bodySize));
+                                        } else {
+                                            state = State.WAITING_FOR_END_OF_REQUEST_BODY;
+                                            return false;
+                                        }
+                                    }
+                                    System.out.println("DISPATCH!");
+                                    requestContext.dispatch();
+                                    state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
+                                    return true;
                                 } else {
                                     respondWithError(StatusCode.BAD_REQUEST_400);
                                 }
@@ -203,33 +220,29 @@ public class Http1ConnectionContext extends ConnectionContext {
                         break;
                     case HEADER_VALUE:
                         if (searchForEndOfLine(MAX_HEADER_VALUE_LENGTH)) {
-                            // we found a end of line, so read between mark and current position as string
+                            // we found an end of line, so read between mark and current position as string
                             final int bytesRead = inputBuffer.resetToMark();
+                            System.out.println("bytesRead = " + bytesRead);
                             final String headerValue = inputBuffer.readString(bytesRead, StandardCharsets.US_ASCII)
                                     .trim(); // TODO is trim efficient enough and is it too tolerant of white space chars
-                            System.out.println("        headerValue = " + headerValue);
+                            System.out.println("        headerValue = [[" + headerValue+"]]");
                             requestContext.getRequestHeaders().put(tempHeaderKey, headerValue);
                             // skip over separator
                             inputBuffer.skip(2);
                             // change to header value state
                             inputBuffer.mark();
-                            state = State.HEADER_VALUE;
+                            state = State.HEADER_KEY;
                         }
                         break;
-                    case START_OF_BODY:
-                        // read unit we have read content length
-                        // TODO handle "Transfer-Encoding" eg "gzip, chunked"
+                    case WAITING_FOR_END_OF_REQUEST_BODY:
                         final int bodySize = requestContext.getRequestHeaders().getContentLength();
-                        if (bodySize <= 0) {
-                            throw new RuntimeException("Bad body size ["+bodySize+"]");
-                        }
                         if (inputBuffer.available(bodySize)) {
                             requestContext.setRequestBody(new BodyInputStream(inputBuffer,bodySize));
+                            System.out.println("DISPATCH WITH BODY");
                             requestContext.dispatch();
                             state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
                             return true;
                         }
-                        break;
                     case WAITING_FOR_RESPONSE_TO_BE_SENT:
                         if (responseSent.get()) {
                             // reset for next HTTP 1.1 request
@@ -286,8 +299,12 @@ public class Http1ConnectionContext extends ConnectionContext {
                     return false;
                 }
             }
-            // we have handled the next to chars so move ahead
-            inputBuffer.skip(2);
+            // we can skip 2 if c2 is not start of \r\n otherwise skip one
+            if (c2 != CR) {
+                inputBuffer.skip(2);
+            } else {
+                inputBuffer.skip(1);
+            }
         }
         return false;
     }

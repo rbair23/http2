@@ -87,7 +87,7 @@ public class OutputBuffer extends OutputStream {
         if (buffer.remaining() < string.length()) dataFull();
         // write a string with no copies - TODO do we need to handle multi byte chars?
         for (int i = 0; i < string.length(); i++) {
-            buffer.putChar(string.charAt(i));
+            buffer.put((byte)string.charAt(i));
         }
     }
 

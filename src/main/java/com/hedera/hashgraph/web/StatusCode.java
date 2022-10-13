@@ -1,5 +1,6 @@
 package com.hedera.hashgraph.web;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -60,13 +61,17 @@ public enum StatusCode {
     StatusCode(int code, String message) {
         this.code = code;
         this.message = message;
-        addCodeToMap(code, this);
     }
 
-    private static final Map<Integer, StatusCode> codeLookupMap = new HashMap<>(1000);
+    private static final Map<Integer, StatusCode> codeLookupMap;
 
-    private void addCodeToMap(int code, StatusCode statusCode) {
-        codeLookupMap.put(code,statusCode);
+    static {
+        final Map<Integer, StatusCode> map = new HashMap<>(1000);
+        final var values = values();
+        for (final StatusCode value : values) {
+            map.put(value.code, value);
+        }
+        codeLookupMap = Collections.unmodifiableMap(map);
     }
 
     /**
