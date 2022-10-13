@@ -2,6 +2,7 @@ package com.hedera.hashgraph.web.impl;
 
 import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.WebServerConfig;
+import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.Http2ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
@@ -82,7 +83,7 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
         this.dispatcher = Objects.requireNonNull(dispatcher);
         this.channelManager = Objects.requireNonNull(channelManager);
         this.availableConnections = new AtomicInteger(config.maxIdleConnections());
-        this.contextReuseManager = new ContextReuseManager();
+        this.contextReuseManager = new ContextReuseManager(dispatcher);
     }
 
     /**
@@ -107,8 +108,8 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
                         var connectionContext = (ConnectionContext) key.attachment();
                         if (connectionContext == null) {
                             // Always start with HTTP/1.1
-                            connectionContext = contextReuseManager.checkoutHttp1ChannelSession(
-                                    dispatcher, channel, availableConnections::incrementAndGet);
+                            connectionContext = contextReuseManager.checkoutHttp1ConnectionContext();
+                            connectionContext.resetWithNewChannel(channel, availableConnections::incrementAndGet);
                             key.attach(connectionContext);
                             availableConnections.decrementAndGet();
                         }
@@ -147,12 +148,11 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
      */
     private void upgradeHttpVersion(final HttpVersion version, final SelectionKey key) {
         if (version == HttpVersion.HTTP_2) {
-            ConnectionContext currentConnectionContext = (ConnectionContext) key.attachment();
-            Http2ConnectionContext http2ChannelSession = contextReuseManager.checkoutHttp2ChannelSession(
-                    dispatcher, (SocketChannel) key.channel(), availableConnections::incrementAndGet);
+            Http1ConnectionContext currentConnectionContext = (Http1ConnectionContext) key.attachment();
+            Http2ConnectionContext http2ChannelSession = contextReuseManager.checkoutHttp2ConnectionContext();
+            http2ChannelSession.resetWithNewChannel((SocketChannel) key.channel(), availableConnections::incrementAndGet);
             key.attach(http2ChannelSession);
-            http2ChannelSession.init(currentConnectionContext);
-            contextReuseManager.returnContext(currentConnectionContext);
+            http2ChannelSession.upgrade(currentConnectionContext);
             // continue handling with HTTP2
             http2ChannelSession.handle(httpVersion -> upgradeHttpVersion(httpVersion, key));
         } else {

@@ -1,16 +1,12 @@
 package com.hedera.hashgraph.web.impl.http2;
 
 import com.hedera.hashgraph.web.HttpVersion;
-import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.impl.*;
+import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.frames.*;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
-import com.hedera.hashgraph.web.impl.util.HttpInputStream;
-import com.hedera.hashgraph.web.impl.util.OutputBuffer;
-import com.twitter.hpack.Decoder;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
@@ -92,16 +88,19 @@ public final class Http2ConnectionContext extends ConnectionContext {
      *
      * @param prev The previous context we need to copy data from
      */
-    public void init(ConnectionContext prev) {
+    public void upgrade(Http1ConnectionContext prev) {
         // TODO copy over the state from the current connection context
         this.channel = prev.getChannel();
         this.in.init(prev.getIn());
+        contextReuseManager.returnHttp1ConnectionContext(prev);
+
     }
 
     @Override
     protected void reset() {
         super.reset();
         clientSettings.resetToDefaults();
+        contextReuseManager.returnHttp2ConnectionContext(this);
         // Note: We don't need to reset the server settings. They never change.
     }
 
@@ -277,8 +276,8 @@ public final class Http2ConnectionContext extends ConnectionContext {
 
         // OK, so we have a new stream. That's great! Let's create a new Http2RequestContext to
         // handle it. When it is closed, we need to remove it from the map.
-        final var requestCtx = contextReuseManager.checkoutHttp2RequestContext(
-                dispatcher, channel, (id) -> streams.remove(id));
+        final var requestCtx = contextReuseManager.checkoutHttp2RequestContext();
+        requestCtx.reset(id -> streams.remove(id), channel);
 
         // Put it in the map
         streams.put(streamId, requestCtx);

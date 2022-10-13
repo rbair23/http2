@@ -62,6 +62,12 @@ public class Http1ConnectionContext extends RequestContext {
     }
 
     @Override
+    public void close() {
+        super.close();
+        contextReuseManager.returnHttp1ConnectionContext(this);
+    }
+
+    @Override
     public void handle(Consumer<HttpVersion> onConnectionUpgrade) {
         //         generic-message = start-line
         //                          *(message-header CRLF)

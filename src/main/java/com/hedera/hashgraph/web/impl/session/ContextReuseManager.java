@@ -4,18 +4,23 @@ import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.Http2ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.Http2RequestContext;
-import com.hedera.hashgraph.web.impl.http2.frames.HeadersFrame;
 
 import java.nio.channels.SocketChannel;
 import java.util.Objects;
-import java.util.concurrent.Callable;
 import java.util.function.IntConsumer;
 import java.util.function.Supplier;
 
 /**
  * Responsible for managing reusable contexts
  */
-public class ContextReuseManager {
+public final class ContextReuseManager {
+
+    /**
+     * The dispatcher to use for dispatching requests. Each of the contexts need this reference,
+     * and it never changes for the life of the {@link ContextReuseManager}, so we just take the
+     * reference at start and reuse it.
+     */
+    private final Dispatcher dispatcher;
 
     /**
      * Each channel has some associated data that we need to maintain. When in use, the channel data is
@@ -41,78 +46,75 @@ public class ContextReuseManager {
     private final IdleList<Http2RequestContext> idleHttp2RequestContexts = new IdleList<>();
 
     /**
-     * Gets a {@link ConnectionContext} instance that can be used for a new channel. If there are
-     * no remaining instance in the {@link #idleHttp1ChannelContexts}, then a new instance
-     * is created. The availableConnections is used to make sure we never create
-     * too many of these.
+     * Create a new instance
      *
-     * @param channel The channel to provide to this instance. Cannot be null.
-     * @return A usable and freshly configured {@link ConnectionContext} instance. Never null.
+     * @param dispatcher cannot be null
      */
-    public Http1ConnectionContext checkoutHttp1ChannelSession(
-            Dispatcher dispatcher, SocketChannel channel, Runnable onCloseCallback) {
-        Objects.requireNonNull(channel);
+    public ContextReuseManager(final Dispatcher dispatcher) {
+        this.dispatcher = Objects.requireNonNull(dispatcher);
+    }
 
-        final Http1ConnectionContext ctx = idleHttp1ChannelContexts.checkout(
+    /**
+     * Gets an {@link Http1ConnectionContext} instance that can be used for a new channel.
+     * The {@link com.hedera.hashgraph.web.impl.IncomingDataHandler} is responsible to make
+     * sure we don't create too many contexts.
+     *
+     * @return An {@link Http1ConnectionContext} instance ready to be configured. Never null.
+     */
+    public Http1ConnectionContext checkoutHttp1ConnectionContext() {
+        return idleHttp1ChannelContexts.checkout(
                 () -> new Http1ConnectionContext(this, dispatcher));
-
-        ctx.resetWithNewChannel(channel, onCloseCallback);
-
-        return ctx;
     }
 
     /**
-     * Gets a {@link ConnectionContext} instance that can be used for a new channel. If there are
-     * no remaining instance in the {@link #idleHttp1ChannelContexts}, then a new instance
-     * is created. The availableConnections is used to make sure we never create
-     * too many of these.
+     * Returns a previously checked out {@link Http1ConnectionContext}. Once returned, do not
+     * use it again until it is re-checked out!
      *
-     * @param channel The channel to provide to this instance. Cannot be null.
-     * @return A usable and freshly configured {@link ConnectionContext} instance. Never null.
+     * @param ctx The context to return. Cannot be null.
      */
-    public Http2ConnectionContext checkoutHttp2ChannelSession(Dispatcher dispatcher, SocketChannel channel, Runnable onCloseCallback) {
-        Objects.requireNonNull(channel);
+    public void returnHttp1ConnectionContext(Http1ConnectionContext ctx) {
+        idleHttp1ChannelContexts.checkin(Objects.requireNonNull(ctx));
+    }
 
-        final Http2ConnectionContext ctx = idleHttp2ChannelContexts.checkout(
+    /**
+     * Gets an {@link Http2ConnectionContext} instance that can be used for a new channel.
+     * The {@link com.hedera.hashgraph.web.impl.IncomingDataHandler} is responsible to make
+     * sure we don't create too many contexts.
+     *
+     * @return An {@link Http2ConnectionContext} instance ready to be configured. Never null.
+     */
+    public Http2ConnectionContext checkoutHttp2ConnectionContext() {
+        return idleHttp2ChannelContexts.checkout(
                 () -> new Http2ConnectionContext(this, dispatcher));
-
-        ctx.resetWithNewChannel(channel, onCloseCallback);
-        return ctx;
     }
-
-    public void returnContext(ConnectionContext ctx) {
-        Objects.requireNonNull(ctx);
-        if (ctx instanceof Http1ConnectionContext http1Ctx) {
-            idleHttp1ChannelContexts.checkin(http1Ctx);
-        } else if (ctx instanceof  Http2ConnectionContext http2Ctx){
-            idleHttp2ChannelContexts.checkin(http2Ctx);
-        }
-    }
-
 
     /**
-     * Gets a {@link Http2RequestContext} instance that can be used for a new request. If there are
-     * no remaining instance in the {@link #idleHttp2RequestContexts}, then a new instance
-     * is created. TODO How to make sure we don't get too many requests??
+     * Returns a previously checked out {@link Http2ConnectionContext}. Once returned, do not
+     * use it again until it is re-checked out!
      *
-     * @return A usable and freshly configured {@link ConnectionContext} instance. Never null.
+     * @param ctx The context to return. Cannot be null.
      */
-    public Http2RequestContext checkoutHttp2RequestContext(Dispatcher dispatcher, SocketChannel channel, IntConsumer onClosed) {
-        final var ctx = idleHttp2RequestContexts.checkout(
+    public void returnHttp2ConnectionContext(Http2ConnectionContext ctx) {
+        idleHttp2ChannelContexts.checkin(Objects.requireNonNull(ctx));
+    }
+
+    /**
+     * Gets a {@link Http2RequestContext} instance that can be used for a new request.
+     *
+     * @return A usable {@link Http2RequestContext} instance ready to be configured. Never null.
+     */
+    public Http2RequestContext checkoutHttp2RequestContext() {
+        return idleHttp2RequestContexts.checkout(
                 () -> new Http2RequestContext(this, dispatcher));
-
-        ctx.reset(onClosed, channel);
-
-        return ctx;
     }
 
     /**
      * Returns the given {@link Http2RequestContext} to the idle set.
      *
-     * @param http2RequestContext The http2RequestContext to return for reuse, not null.
+     * @param http2RequestContext The context to return for reuse, not null.
      */
-    public void returnHttp2RequestContext(Http2RequestContext http2RequestContext) {
-        idleHttp2RequestContexts.checkin(http2RequestContext);
+    public void returnHttp2RequestContext(final Http2RequestContext http2RequestContext) {
+        idleHttp2RequestContexts.checkin(Objects.requireNonNull(http2RequestContext));
     }
 
     /**

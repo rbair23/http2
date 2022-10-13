@@ -88,7 +88,7 @@ public abstract class ConnectionContext implements AutoCloseable {
      *
      * @param channel The new channel to hold data for.
      */
-    protected final void resetWithNewChannel(SocketChannel channel, Runnable onCloseCallback) {
+    public final void resetWithNewChannel(SocketChannel channel, Runnable onCloseCallback) {
         closed = false;
         this.channel = Objects.requireNonNull(channel);
         this.onCloseCallback = Objects.requireNonNull(onCloseCallback);
@@ -119,9 +119,6 @@ public abstract class ConnectionContext implements AutoCloseable {
 
             this.channel = null;
             this.in.reset();
-
-            contextReuseManager.returnContext(this);
-
             this.onCloseCallback.run();
         }
     }
