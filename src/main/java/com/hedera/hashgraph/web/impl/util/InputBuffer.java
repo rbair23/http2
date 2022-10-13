@@ -270,19 +270,25 @@ public final class InputBuffer {
         return string;
     }
 
-    public HttpVersion readVersion() {
+    public HttpVersion readVersion() throws ParseException {
         // "HTTP/1.0"
-        if (readByte() != 'H') throw new RuntimeException();
-        if (readByte() != 'T') throw new RuntimeException();
-        if (readByte() != 'T') throw new RuntimeException();
-        if (readByte() != 'P') throw new RuntimeException();
-        if (readByte() != '/') throw new RuntimeException();
+        if (readByte() != 'H') throw new ParseException("Bad Version",0);
+        if (readByte() != 'T') throw new ParseException("Bad Version",1);
+        if (readByte() != 'T') throw new ParseException("Bad Version",2);
+        if (readByte() != 'P') throw new ParseException("Bad Version",3);
+        if (readByte() != '/') throw new ParseException("Bad Version",4);
         int majorChar = readByte();
-        if (readByte() != '.') throw new RuntimeException();
-        int minorChar = readByte();
-        if (majorChar == '1' && minorChar == '0') return HttpVersion.HTTP_1;
-        if (majorChar == '1' && minorChar == '1') return HttpVersion.HTTP_1_1;
-        if (majorChar == '2' && minorChar == '0') return HttpVersion.HTTP_2;
+        int charAfterDigit = peekByte();
+        if (charAfterDigit == '\r' && majorChar == '2') {
+            // sometimes version is just "HTTP/2" which is not valid but is in use
+            return HttpVersion.HTTP_2;
+        } else {
+            if (readByte() != '.') throw new ParseException("Bad Version", 4);
+            int minorChar = readByte();
+            if (majorChar == '1' && minorChar == '0') return HttpVersion.HTTP_1;
+            if (majorChar == '1' && minorChar == '1') return HttpVersion.HTTP_1_1;
+            if (majorChar == '2' && minorChar == '0') return HttpVersion.HTTP_2;
+        }
         return null;
     }
 

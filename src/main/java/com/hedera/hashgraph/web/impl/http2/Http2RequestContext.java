@@ -102,7 +102,7 @@ public final class Http2RequestContext extends RequestContext {
         super(dispatcher);
         this.contextReuseManager = Objects.requireNonNull(contextReuseManager);
 
-        this.requestBody = new byte[bufferSize];
+        this.requestBody = new byte[16*1024];
         this.requestBodyInputStream = new ReusableByteArrayInputStream(requestBody);
     }
 
@@ -113,7 +113,7 @@ public final class Http2RequestContext extends RequestContext {
      */
     public void reset(IntConsumer onClose, SocketChannel channel) {
         super.reset();
-        this.channel = channel; // kinda suspicious...
+//        this.channel = channel; // kinda suspicious...
         this.state = State.IDLE;
         this.streamId = -1;
         this.onClose = onClose;
@@ -152,15 +152,8 @@ public final class Http2RequestContext extends RequestContext {
         frameHeaderBuffer.getBuffer().flip();
         dataOutputBuffer.getBuffer().flip();
         // write both buffers atomically to channel
-        channel.write(headerAndDataBuffers);
+        // TODO channel.write(headerAndDataBuffers);
     }
-
-    // =================================================================================================================
-    // RequestContext Methods
-
-    // TODO not sure the meaning of this for Http2RequestContext
-    @Override
-    public void handle(Consumer<HttpVersion> onConnectionUpgrade) {}
 
     // =================================================================================================================
     // WebRequest Methods
@@ -258,9 +251,9 @@ public final class Http2RequestContext extends RequestContext {
          */
     }
 
-    @Override
+    //@Override TODO
     public void close() {
-        super.close();
+        // super.close(); TODO
         if (onClose != null) {
             onClose.accept(streamId);
         }

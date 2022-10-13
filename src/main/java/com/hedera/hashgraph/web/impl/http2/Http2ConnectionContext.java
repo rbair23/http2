@@ -6,8 +6,10 @@ import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.frames.*;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
+import com.hedera.hashgraph.web.impl.util.InputBuffer;
 
 import java.io.IOException;
+import java.nio.channels.SocketChannel;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -91,14 +93,14 @@ public final class Http2ConnectionContext extends ConnectionContext {
     public void upgrade(Http1ConnectionContext prev) {
         // TODO copy over the state from the current connection context
         this.channel = prev.getChannel();
-        this.inputBuffer.init(prev.getIn());
+        this.inputBuffer.init(prev.getInputBuffer());
         contextReuseManager.returnHttp1ConnectionContext(prev);
 
     }
 
     @Override
-    protected void reset() {
-        super.reset();
+    public void reset(SocketChannel channel, Runnable onCloseCallback) {
+        super.reset(channel, onCloseCallback);
         clientSettings.resetToDefaults();
         contextReuseManager.returnHttp2ConnectionContext(this);
         // Note: We don't need to reset the server settings. They never change.
@@ -187,6 +189,12 @@ public final class Http2ConnectionContext extends ConnectionContext {
                 close();
             }
         }
+        return false;
+    }
+
+    @Override
+    public boolean doHandle(Consumer<HttpVersion> onConnectionUpgrade) {
+        return false;
     }
 
 

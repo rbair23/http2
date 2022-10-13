@@ -7,6 +7,10 @@ import java.util.*;
 import java.util.function.BiConsumer;
 
 public final class WebHeaders {
+    private static final DateTimeFormatter HEADER_DATE_FORMATTER =
+            DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss z", Locale.ENGLISH)
+                    .withZone(ZoneId.of("UTC"));
+
     public static final String CONTENT_TYPE_PLAIN_TEXT = "/text/plain";
     public static final String CONTENT_TYPE_HTML = "text/html; charset=UTF-8";
     public static final String CONTENT_TYPE_JSON = "application/json";
@@ -22,8 +26,9 @@ public final class WebHeaders {
 
     private final Map<String, String> headers = new HashMap<>();
 
-    public void put(String key, String value) {
+    public WebHeaders put(String key, String value) {
         headers.put(key, value);
+        return this;
     }
 
     /**
@@ -32,8 +37,9 @@ public final class WebHeaders {
      * @param key header key
      * @param date header value instant
      */
-    public void put(String key, Instant date) {
+    public WebHeaders put(String key, Instant date) {
         headers.put(key, FORMATTER.format(date));
+        return this;
     }
 
     public String get(String key) {
@@ -107,5 +113,25 @@ public final class WebHeaders {
 
     public String getServer() {
         return get("Server");
+    }
+
+    public WebHeaders setDateToNow() {
+        put("Date", HEADER_DATE_FORMATTER.format(Instant.now()));
+        return this;
+    }
+
+    public WebHeaders setNoCache() {
+        put("Expires", HEADER_DATE_FORMATTER.format(Instant.now()));
+        put("Cache-Control", "max-age=0, no-cache, no-store");
+        return this;
+    }
+
+    public WebHeaders setStandardResponseHeaders() {
+        setDateToNow();
+        setNoCache();
+        setServer(WebServer.SERVER_NAME);
+        put("Connection","keep-alive"); // TODO ?
+        put("X-Robots-Tag","noindex"); // TODO ?
+        return this;
     }
 }

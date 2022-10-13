@@ -162,4 +162,9 @@ public abstract class ConnectionContext implements AutoCloseable {
 
         return channel;
     }
+
+
+    public InputBuffer getInputBuffer() {
+        return inputBuffer;
+    }
 }

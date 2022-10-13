@@ -26,6 +26,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * This implementation of HTTP/2.0 does not support PUSH_PROMISE or server side push in general at this time.
  */
 public final class WebServer {
+    /**
+     * Name of server for responses
+     */
+    public static final String SERVER_NAME = "hedera";
 
     /**
      * The server lifecycle.

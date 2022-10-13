@@ -5,9 +5,7 @@ import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.Http2ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.Http2RequestContext;
 
-import java.nio.channels.SocketChannel;
 import java.util.Objects;
-import java.util.function.IntConsumer;
 import java.util.function.Supplier;
 
 /**
@@ -85,7 +83,7 @@ public final class ContextReuseManager {
      */
     public Http2ConnectionContext checkoutHttp2ConnectionContext() {
         return idleHttp2ChannelContexts.checkout(
-                () -> new Http2ConnectionContext(this, dispatcher));
+                () -> new Http2ConnectionContext(this));
     }
 
     /**
