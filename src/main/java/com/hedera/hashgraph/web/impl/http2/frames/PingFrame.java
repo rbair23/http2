@@ -1,11 +1,9 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
-import com.hedera.hashgraph.web.impl.util.HttpInputStream;
+import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Exception;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
-
-import java.io.IOException;
 
 /**
  * A connection-level frame.
@@ -53,7 +51,7 @@ public final class PingFrame extends Frame {
      * @param in The input stream. Cannot be null.
      * @return The ping frame's data
      */
-    public static long parseData(HttpInputStream in) {
+    public static long parseData(InputBuffer in) {
         // Read off the frame length. This *MUST* be 8 bytes, exactly.
         final var frameLength = in.read24BitInteger();
         if (frameLength != 8) {

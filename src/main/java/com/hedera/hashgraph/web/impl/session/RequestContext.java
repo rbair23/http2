@@ -7,71 +7,81 @@ import com.hedera.hashgraph.web.WebRequest;
 import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.impl.util.ReusableByteArrayInputStream;
 
-import java.io.IOException;
 import java.io.InputStream;
+import java.util.Objects;
 
-public abstract class RequestContext extends ConnectionContext implements WebRequest {
+/**
+ * Represents a single request. They double as the implementation of {@link WebRequest}, so we do not
+ * have to copy data into the {@link WebRequest}. This means that initially this class is called on the
+ * "web server" thread, as it is populated with data, and then switches to one of the "web handler"
+ * threads from the thread pool. So multi-threading considerations need to be taken into account.
+ */
+public abstract class RequestContext implements WebRequest {
+
+    /**
+     * The {@link Dispatcher} to use for dispatching {@link com.hedera.hashgraph.web.WebRequest}s.
+     */
+    protected final Dispatcher dispatcher;
 
     // =================================================================================================================
     // Request Data
 
     /**
-     * Parsed from the input stream.
+     * This field is set while parsing the HTTP request, and before the request is sent to a handler.
      */
     protected String method;
 
     /**
-     * Parsed from the input stream.
+     * This field is set while parsing the HTTP request, and before the request is sent to a handler.
      */
     protected String path;
 
     /**
-     * Parsed from the input stream.
+     * This field is set while parsing the HTTP request, and before the request is sent to a handler.
      */
     protected HttpVersion version;
 
     /**
-     * A new instance is created for each request. After we read all the header data, we parse it
-     * and produce an instance of {@link WebHeaders}.
+     * The request headers. This instance is reused between requests. After we read all the header data,
+     * we parse it and set the headers in this the {@link WebHeaders} instance.
      */
     protected final WebHeaders requestHeaders = new WebHeaders();
 
-    protected final byte[] requestBody = new byte[16*1024];
-    private int requestBodyLength = 0;
-    protected final ReusableByteArrayInputStream requestBodyInputStream = new ReusableByteArrayInputStream(requestBody);
-
     // =================================================================================================================
     // Response Data
+
+    /**
+     * Set by the user when closing a request.
+     */
     protected WebHeaders responseHeaders;
 
+    /**
+     * Set by the user when closing a request;
+     */
     protected StatusCode responseCode;
 
     // =================================================================================================================
     // ConnectionContext Methods
 
-    protected RequestContext(ContextReuseManager contextReuseManager, Dispatcher dispatcher) {
-        super(contextReuseManager, dispatcher, 16*1024);
+    /**
+     * Create a new instance.
+     *
+     * @param dispatcher The dispatcher to send this request to. Must not be null.
+     */
+    protected RequestContext(final Dispatcher dispatcher) {
+        this.dispatcher = Objects.requireNonNull(dispatcher);
     }
 
-    @Override
+    /**
+     * Called to reset the request context prior to its next use.
+     */
     protected void reset() {
-        super.reset();
         requestHeaders.clear();
-        requestBodyLength = 0;
-        requestBodyInputStream.reuse(0);
         method = null;
         path = null;
         version = null;
         responseHeaders = null;
-    }
-
-    public int getRequestBodyLength() {
-        return requestBodyLength;
-    }
-
-    public void setRequestBodyLength(int requestBodyLength) {
-        this.requestBodyLength = requestBodyLength;
-        requestBodyInputStream.reuse(requestBodyLength);
+        responseCode = StatusCode.OK_200;
     }
 
     // =================================================================================================================
@@ -98,10 +108,10 @@ public abstract class RequestContext extends ConnectionContext implements WebReq
     }
 
     @Override
-    public InputStream getRequestBody() throws IOException {
+    public InputStream getRequestBody() {
+        // TODO This needs to be implemented!!!
         return null;
     }
-
 }
 
 

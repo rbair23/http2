@@ -1,6 +1,6 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
-import com.hedera.hashgraph.web.impl.util.HttpInputStream;
+import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 import java.io.IOException;
@@ -209,7 +209,7 @@ public abstract class Frame {
         out.write32BitInteger(streamId);
     }
 
-    static int readAheadStreamId(final HttpInputStream in) {
+    static int readAheadStreamId(final InputBuffer in) {
         in.mark();
         in.skip(5);
         final var id = in.read31BitInteger();

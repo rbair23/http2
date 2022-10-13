@@ -5,6 +5,7 @@ import com.hedera.hashgraph.web.StatusCode;
 import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.HttpVersion;
+import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
 import com.hedera.hashgraph.web.impl.session.RequestContext;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
@@ -21,7 +22,7 @@ import java.util.function.Consumer;
  *     <li><a href="https://httpwg.org/specs/rfc9110.html#trailer.fields">Trailer Fields</a></li>
  * </ul>
  */
-public class Http1ConnectionContext extends RequestContext {
+public class Http1ConnectionContext extends ConnectionContext {
     private static final int MAX_METHOD_LENGTH = 1024;
     private static final int MAX_URI_LENGTH = 2024;
     private static final int MAX_VERSION_LENGTH = 8;
@@ -36,7 +37,16 @@ public class Http1ConnectionContext extends RequestContext {
     private static final byte[] HTTP2_PREFACE_END = "\r\nSM\r\n\r\n".getBytes();
 
     /** States for parser state machine */
-    private enum State {BEGIN,METHOD,URI,VERSION,HTTP2_PREFACE,HEADER_KEY,HEADER_VALUE,COLLECTING_BODY};
+    private enum State {
+        BEGIN,
+        METHOD,
+        URI,
+        VERSION,
+        HTTP2_PREFACE,
+        HEADER_KEY,
+        HEADER_VALUE,
+        COLLECTING_BODY
+    };
 
     /** Parsing state machine current state */
     private State state;
@@ -45,13 +55,21 @@ public class Http1ConnectionContext extends RequestContext {
     private String tempHeaderKey;
 
     /**
+     * Output buffer used for channel level sending of data, for HTTP 1 & 1.1 this can be used for responses as well for
+     * HTTP 2 each response stream has its own buffer as well and this is just used for channel communications.
+     * TODO Maybe move this to the child classes
+     */
+    private final OutputBuffer outputBuffer;
+
+    /**
      * Create a new instance.
      *
      * @param contextReuseManager
      * @param dispatcher
      */
-    public Http1ConnectionContext(ContextReuseManager contextReuseManager, Dispatcher dispatcher) {
-        super(contextReuseManager, dispatcher);
+    public Http1ConnectionContext(final ContextReuseManager contextReuseManager, final Dispatcher dispatcher) {
+        super(contextReuseManager, 16*1024);
+        this.outputBuffer = new OutputBuffer(16*1024);
     }
 
 
@@ -68,7 +86,7 @@ public class Http1ConnectionContext extends RequestContext {
     }
 
     @Override
-    public void handle(Consumer<HttpVersion> onConnectionUpgrade) {
+    public boolean doHandle(Consumer<HttpVersion> onConnectionUpgrade) {
         //         generic-message = start-line
         //                          *(message-header CRLF)
         //                          CRLF

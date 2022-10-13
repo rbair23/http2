@@ -1,6 +1,6 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
-import com.hedera.hashgraph.web.impl.util.HttpInputStream;
+import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Exception;
@@ -62,7 +62,7 @@ public final class SettingsFrame extends Frame {
      * @param in The input stream, cannot be null.
      * @param settings The settings to merge results into. Cannot be null.
      */
-    public static void parseAndMerge(HttpInputStream in, Settings settings) {
+    public static void parseAndMerge(InputBuffer in, Settings settings) {
         // SPEC: 6.5
         //   A settings frame with a length other than a multiple of 6 bytes MUST be treated as a connection error
         //   of type FRAME_SIZE_ERROR.

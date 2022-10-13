@@ -1,6 +1,6 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
-import com.hedera.hashgraph.web.impl.util.HttpInputStream;
+import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 import java.io.IOException;
@@ -51,7 +51,7 @@ public final class DataFrame extends Frame {
      * @param in The input stream. Cannot be null and must have the entire frame's data buffered up already.
      * @return A non-null {@link DataFrame}
      */
-    public static DataFrame parse(HttpInputStream in) {
+    public static DataFrame parse(InputBuffer in) {
         // First, read off the header information. These are the first 9 bytes.
 
         // Read the length off. We will use this to compute the length of fragment data

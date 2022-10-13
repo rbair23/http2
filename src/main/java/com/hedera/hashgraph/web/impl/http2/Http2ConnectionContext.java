@@ -10,6 +10,7 @@ import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
@@ -72,10 +73,9 @@ public final class Http2ConnectionContext extends ConnectionContext {
      * Create a new instance.
      *
      * @param contextReuseManager The {@link ContextReuseManager} that manages this instance. Must not be null.
-     * @param dispatcher The {@link Dispatcher} to use for dispatching requests. Cannot be null.
      */
-    public Http2ConnectionContext(final ContextReuseManager contextReuseManager, final Dispatcher dispatcher) {
-        super(contextReuseManager, dispatcher, Settings.INITIAL_FRAME_SIZE);
+    public Http2ConnectionContext(final ContextReuseManager contextReuseManager) {
+        super(contextReuseManager, Settings.INITIAL_FRAME_SIZE);
 
         // TODO this configuration value really should come from the web server configs
         serverSettings.setMaxConcurrentStreams(100);
@@ -91,7 +91,7 @@ public final class Http2ConnectionContext extends ConnectionContext {
     public void upgrade(Http1ConnectionContext prev) {
         // TODO copy over the state from the current connection context
         this.channel = prev.getChannel();
-        this.in.init(prev.getIn());
+        this.inputBuffer.init(prev.getIn());
         contextReuseManager.returnHttp1ConnectionContext(prev);
 
     }
@@ -115,7 +115,7 @@ public final class Http2ConnectionContext extends ConnectionContext {
 
     // NOTE: Once in this context, we never perform an upgrade
     @Override
-    public void handle(Consumer<HttpVersion> ignored) {
+    public boolean handle(Consumer<HttpVersion> ignored) {
         try {
             var needMoreData = false;
             while (!needMoreData) {
@@ -133,8 +133,8 @@ public final class Http2ConnectionContext extends ConnectionContext {
                     // Clients and servers MUST treat an invalid connection preface as a connection error
                     // (Section 5.4.1) of type PROTOCOL_ERROR.
                     case AWAITING_SETTINGS -> {
-                        if (in.available(FRAME_HEADER_SIZE)) {
-                            final var nextFrameType = in.peekByte(3);
+                        if (inputBuffer.available(FRAME_HEADER_SIZE)) {
+                            final var nextFrameType = inputBuffer.peekByte(3);
                             if (nextFrameType != FrameType.SETTINGS.ordinal()) {
                                 throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, CONNECTION_STREAM_ID);
                             }
@@ -153,9 +153,9 @@ public final class Http2ConnectionContext extends ConnectionContext {
                         // of the payload. When added to the FRAME_HEADER_SIZE, we get the total number
                         // of bytes for the frame. We then make sure we have ALL those bytes available
                         // before we process anything.
-                        if (in.available(3)) {
-                            int length = in.peek24BitInteger();
-                            if (in.available(FRAME_HEADER_SIZE + length)) {
+                        if (inputBuffer.available(3)) {
+                            int length = inputBuffer.peek24BitInteger();
+                            if (inputBuffer.available(FRAME_HEADER_SIZE + length)) {
                                 handleFrame();
                             } else {
                                 needMoreData = true;
@@ -217,7 +217,7 @@ public final class Http2ConnectionContext extends ConnectionContext {
      *                     connection input or output streams themselves, representing a broken connection.
      */
     private void handleFrame() throws IOException {
-        final var type = FrameType.valueOf(in.peekByte(3));
+        final var type = FrameType.valueOf(inputBuffer.peekByte(3));
         switch (type) {
             case SETTINGS -> handleSettings();
             case HEADERS -> handleHeaders();
@@ -233,8 +233,8 @@ public final class Http2ConnectionContext extends ConnectionContext {
      * Skips the current frame.
      */
     private void skipUnknownFrame() {
-        final var frameLength = in.peek24BitInteger();
-        in.skip(frameLength + FRAME_HEADER_SIZE);
+        final var frameLength = inputBuffer.peek24BitInteger();
+        inputBuffer.skip(frameLength + FRAME_HEADER_SIZE);
     }
 
     /**
@@ -243,7 +243,7 @@ public final class Http2ConnectionContext extends ConnectionContext {
      * @throws IOException thrown if we cannot write to the output channel
      */
     private void handlePing() throws IOException {
-        final var pingData = PingFrame.parseData(in);
+        final var pingData = PingFrame.parseData(inputBuffer);
         outputBuffer.reset();
         PingFrame.writeAck(outputBuffer, pingData);
         outputBuffer.sendContentsToChannel(channel);
@@ -255,7 +255,7 @@ public final class Http2ConnectionContext extends ConnectionContext {
      * @throws IOException thrown if we cannot write to the output channel
      */
     private void handleSettings() throws IOException {
-        SettingsFrame.parseAndMerge(in, clientSettings);
+        SettingsFrame.parseAndMerge(inputBuffer, clientSettings);
         outputBuffer.reset();
         SettingsFrame.writeAck(outputBuffer);
         outputBuffer.sendContentsToChannel(channel);
@@ -266,7 +266,7 @@ public final class Http2ConnectionContext extends ConnectionContext {
      * it is a big problem! The spec doesn't say what should happen. So I'll start by being belligerent.
      */
     private void handleHeaders() {
-        final var headerFrame = HeadersFrame.parse(in);
+        final var headerFrame = HeadersFrame.parse(inputBuffer);
         final var streamId = headerFrame.getStreamId();
 
         // Please, don't try to send the same headers frame twice...
@@ -293,7 +293,7 @@ public final class Http2ConnectionContext extends ConnectionContext {
      * refer to the physical connection, only one of the logical connection streams.
      */
     private void handleRstStream() {
-        final var frame = RstStreamFrame.parse(in);
+        final var frame = RstStreamFrame.parse(inputBuffer);
         final var streamId = frame.getStreamId();
         final var stream = streams.get(streamId);
         if (stream != null) {

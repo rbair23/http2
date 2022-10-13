@@ -1,6 +1,6 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
-import com.hedera.hashgraph.web.impl.util.HttpInputStream;
+import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Exception;
@@ -42,7 +42,7 @@ public final class RstStreamFrame extends Frame {
      * @param in The input stream, cannot be null
      * @return A new frame instance
      */
-    public static RstStreamFrame parse(HttpInputStream in) {
+    public static RstStreamFrame parse(InputBuffer in) {
         // SPEC:
         // A RST_STREAM frame with a length other than 4 octets MUST be treated as a connection error (Section 5.4.1)
         // of type FRAME_SIZE_ERROR.

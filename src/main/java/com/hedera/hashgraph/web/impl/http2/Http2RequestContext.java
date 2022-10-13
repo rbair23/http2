@@ -10,6 +10,7 @@ import com.hedera.hashgraph.web.impl.http2.frames.HeadersFrame;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
 import com.hedera.hashgraph.web.impl.session.RequestContext;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
+import com.hedera.hashgraph.web.impl.util.ReusableByteArrayInputStream;
 import com.twitter.hpack.Decoder;
 import com.twitter.hpack.Encoder;
 
@@ -18,6 +19,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -54,8 +56,23 @@ public final class Http2RequestContext extends RequestContext {
     // TODO I will need the client settings
 
 
+    private final ContextReuseManager contextReuseManager;
 
 
+    /**
+     * TODO I don't think we should need this anymore?
+     */
+    protected final byte[] requestBody;
+
+    /**
+     * TODO I don't think we should need this anymore?
+     */
+    private int requestBodyLength = 0;
+
+    /**
+     * TODO I don't think we should need this anymore?
+     */
+    protected final ReusableByteArrayInputStream requestBodyInputStream;
 
 
     // TODO Could reuse requestBody byte[] here but that would mean we need semantics for when you can and can't ready body, ugg
@@ -82,7 +99,11 @@ public final class Http2RequestContext extends RequestContext {
      * @param dispatcher The {@link Dispatcher} to use for dispatching requests. Cannot be null.
      */
     public Http2RequestContext(final ContextReuseManager contextReuseManager, final Dispatcher dispatcher) {
-        super(contextReuseManager, dispatcher);
+        super(dispatcher);
+        this.contextReuseManager = Objects.requireNonNull(contextReuseManager);
+
+        this.requestBody = new byte[bufferSize];
+        this.requestBodyInputStream = new ReusableByteArrayInputStream(requestBody);
     }
 
     /**
@@ -98,6 +119,9 @@ public final class Http2RequestContext extends RequestContext {
         this.onClose = onClose;
         this.dataOutputBuffer.reset();
         this.frameHeaderBuffer.reset();
+
+        requestBodyLength = 0;
+        requestBodyInputStream.reuse(0);
     }
 
     private void sendRequestOutputBufferContentsAsLastFrame() {

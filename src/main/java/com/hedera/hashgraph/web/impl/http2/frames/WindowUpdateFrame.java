@@ -1,6 +1,6 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
-import com.hedera.hashgraph.web.impl.util.HttpInputStream;
+import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Exception;
 
@@ -32,7 +32,7 @@ public final class WindowUpdateFrame extends Frame {
      * @param in The input stream. Not null.
      * @return The {@link WindowUpdateFrame} instance.
      */
-    public static WindowUpdateFrame parse(HttpInputStream in) {
+    public static WindowUpdateFrame parse(InputBuffer in) {
         // SPEC:
         // A WINDOW_UPDATE frame with a length other than 4 octets MUST be treated as a connection error
         // (Section 5.4.1) of type FRAME_SIZE_ERROR.

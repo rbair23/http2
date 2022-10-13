@@ -127,7 +127,7 @@ public final class ChannelManager implements AutoCloseable {
                 itr.remove();
                 accept();
             } else if (key.isReadable()) {
-                if (onRead.test(key)) {
+                if (!onRead.test(key)) {
                     itr.remove();
                 }
             }

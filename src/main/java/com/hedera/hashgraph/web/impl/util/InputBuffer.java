@@ -38,7 +38,7 @@ import java.util.Arrays;
  * Note that this class is not threadsafe, and doesn't need to be, because all code interacting with it
  * does so from the same thread.
  */
-public final class HttpInputStream {
+public final class InputBuffer {
     /**
      * The buffer into which data is read. The buffer may not be full (i.e. when we last read
      * from the stream, we may have only filled part of the buffer). When the buffer does get
@@ -81,7 +81,7 @@ public final class HttpInputStream {
      *             point later. For example, if a client tries to read a 1K byte array from the stream but the
      *             buffer within the stream is less than 1K, an exception will be thrown.
      */
-    public HttpInputStream(final int size) {
+    public InputBuffer(final int size) {
         if (size <= 0) {
             throw new IllegalArgumentException("The size must be positive");
         }
@@ -558,7 +558,7 @@ public final class HttpInputStream {
         }
     }
 
-    public void init(HttpInputStream in) {
+    public void init(InputBuffer in) {
         final var length = in.endPosition - in.readPosition;
         System.arraycopy(in.buffer, in.readPosition, buffer, 0, length);
         this.markedPosition = -1;

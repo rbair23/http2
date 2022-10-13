@@ -109,24 +109,13 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
                         if (connectionContext == null) {
                             // Always start with HTTP/1.1
                             connectionContext = contextReuseManager.checkoutHttp1ConnectionContext();
-                            connectionContext.resetWithNewChannel(channel, availableConnections::incrementAndGet);
+                            connectionContext.reset(channel, availableConnections::incrementAndGet);
                             key.attach(connectionContext);
                             availableConnections.decrementAndGet();
                         }
                         
-                        boolean allDataRead = false;
-                        try {
-                            // Put the data into the input stream
-                            allDataRead = !connectionContext.getIn().addData(connectionContext.getChannel());
-                        } catch (IOException e) {
-                            // The dang channel is closed, we need to clean things up
-                            e.printStackTrace();
-                            connectionContext.close();
-                        }
-
-                        // Delegate to the protocol handler!
-                        connectionContext.handle(httpVersion -> upgradeHttpVersion(httpVersion, key));
-                        return allDataRead;
+                        // Delegate to the context to handle the input!
+                        return connectionContext.handle(httpVersion -> upgradeHttpVersion(httpVersion, key));
                     }
                     return true;
                 });
@@ -150,7 +139,7 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
         if (version == HttpVersion.HTTP_2) {
             Http1ConnectionContext currentConnectionContext = (Http1ConnectionContext) key.attachment();
             Http2ConnectionContext http2ChannelSession = contextReuseManager.checkoutHttp2ConnectionContext();
-            http2ChannelSession.resetWithNewChannel((SocketChannel) key.channel(), availableConnections::incrementAndGet);
+            http2ChannelSession.reset((SocketChannel) key.channel(), availableConnections::incrementAndGet);
             key.attach(http2ChannelSession);
             http2ChannelSession.upgrade(currentConnectionContext);
             // continue handling with HTTP2
