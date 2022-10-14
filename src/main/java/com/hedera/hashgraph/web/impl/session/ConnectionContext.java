@@ -122,7 +122,7 @@ public abstract class ConnectionContext implements AutoCloseable {
     public void reset(SocketChannel channel, Runnable onCloseCallback) {
         closed = false;
         this.channel = Objects.requireNonNull(channel);
-        this.onClose = Objects.requireNonNull(onCloseCallback);
+        this.onClose = onCloseCallback;
         this.inputBuffer.reset();
         this.outputBuffer.reset();
     }

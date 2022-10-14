@@ -154,6 +154,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                                         state = State.HTTP2_PREFACE;
                                     }
                                 }
+//                                System.out.println("----- "+requestContext.getMethod()+"  "+requestContext.getPath()+"  "+requestContext.getVersion());
                             } catch (Exception e) {
                                 return respondWithError(StatusCode.HTTP_VERSION_NOT_SUPPORTED_505);
                             }
@@ -181,10 +182,10 @@ public class Http1ConnectionContext extends ConnectionContext {
                                     inputBuffer.skip(2);
                                     // we are now ready for body
                                     inputBuffer.mark();
-                                    System.out.println("requestContext.getRequestHeaders() = " + requestContext.getRequestHeaders());
+//                                    System.out.println("requestContext.getRequestHeaders() = " + requestContext.getRequestHeaders());
                                     // check if there is a request body to read
                                     final int bodySize = requestContext.getRequestHeaders().getContentLength();
-                                    System.out.println("bodySize = " + bodySize);
+//                                    System.out.println("bodySize = " + bodySize);
                                     if (bodySize > 0) {
                                         if (inputBuffer.available(bodySize)) {
                                             requestContext.setRequestBody(new BodyInputStream(inputBuffer, bodySize));

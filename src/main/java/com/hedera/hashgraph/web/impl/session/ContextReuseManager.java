@@ -152,7 +152,7 @@ public final class ContextReuseManager {
             }
 
             slot.data = data;
-            slot.next = firstIdle.next;
+            if (firstIdle != null) slot.next = firstIdle.next;
             firstIdle = slot;
         }
     }
