@@ -8,8 +8,10 @@ import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 import java.util.zip.GZIPOutputStream;
 
 import static com.hedera.hashgraph.web.impl.http.Http1Constants.*;
@@ -133,20 +135,22 @@ class Http1RequestContext extends RequestContext {
     @Override
     public OutputStream startResponse(StatusCode statusCode, WebHeaders responseHeaders) throws ResponseAlreadySentException {
         try {
-            responseCode = statusCode;
-            responseHeaders = requestHeaders;
+            this.responseCode = Objects.requireNonNull(statusCode);
+            this.responseHeaders = Objects.requireNonNull(responseHeaders);
             sendHeader();
             // create low level sending stream
             final HttpOutputStream httpOutputStream = new HttpOutputStream(outputBuffer, channel){
                 @Override
                 public void close() throws IOException {
                     super.close();
+                    channel.write(ByteBuffer.wrap(new byte[]{CR,LF}));
                     responseSent();
                 }
             };
             OutputStream outputStream = httpOutputStream;
             // check for gzip
-            if (responseHeaders.getContentEncoding().contains(WebHeaders.CONTENT_ENCODING_GZIP)) {
+            final String contentEncoding = this.responseHeaders.getContentEncoding();
+            if (contentEncoding != null && contentEncoding.contains(WebHeaders.CONTENT_ENCODING_GZIP)) {
                 outputStream = new GZIPOutputStream(outputStream);
             }
             return outputStream;

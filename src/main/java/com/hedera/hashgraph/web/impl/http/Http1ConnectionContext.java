@@ -85,7 +85,6 @@ public class Http1ConnectionContext extends ConnectionContext {
         // loop while there is still data to process, we can go through multiple states
         try {
             while (inputBuffer.available(1)) {
-                System.out.println("state = " + state);
                 switch (state) {
                     case BEGIN:
                         inputBuffer.mark();
@@ -175,11 +174,9 @@ public class Http1ConnectionContext extends ConnectionContext {
                     case HEADER_KEY:
                         // check for end of headers with a double new line
                         if (inputBuffer.available(2)) {
-                            System.out.println("inputBuffer.peekByte()+inputBuffer.peekByte(1) = " + inputBuffer.peekByte()+inputBuffer.peekByte(1));
                             // look ahead for end of line
                             if ((char) inputBuffer.peekByte() == CR) {
                                 if ((char) inputBuffer.peekByte(1) == LF) {
-                                    System.out.println("END OF HEADERS");
                                     // we have handled the next to chars so move ahead
                                     inputBuffer.skip(2);
                                     // we are now ready for body
@@ -196,7 +193,6 @@ public class Http1ConnectionContext extends ConnectionContext {
                                             return false;
                                         }
                                     }
-                                    System.out.println("DISPATCH!");
                                     requestContext.dispatch();
                                     state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
                                     return true;
@@ -210,7 +206,6 @@ public class Http1ConnectionContext extends ConnectionContext {
                             // we found a separator, so read between mark and current position as string
                             final int bytesRead = inputBuffer.resetToMark();
                             tempHeaderKey = inputBuffer.readString(bytesRead, StandardCharsets.US_ASCII);
-                            System.out.println("headerKey = " + tempHeaderKey);
                             // skip over separator
                             inputBuffer.skip(1);
                             // change to header value state
@@ -222,10 +217,8 @@ public class Http1ConnectionContext extends ConnectionContext {
                         if (searchForEndOfLine(MAX_HEADER_VALUE_LENGTH)) {
                             // we found an end of line, so read between mark and current position as string
                             final int bytesRead = inputBuffer.resetToMark();
-                            System.out.println("bytesRead = " + bytesRead);
                             final String headerValue = inputBuffer.readString(bytesRead, StandardCharsets.US_ASCII)
                                     .trim(); // TODO is trim efficient enough and is it too tolerant of white space chars
-                            System.out.println("        headerValue = [[" + headerValue+"]]");
                             requestContext.getRequestHeaders().put(tempHeaderKey, headerValue);
                             // skip over separator
                             inputBuffer.skip(2);
@@ -238,7 +231,6 @@ public class Http1ConnectionContext extends ConnectionContext {
                         final int bodySize = requestContext.getRequestHeaders().getContentLength();
                         if (inputBuffer.available(bodySize)) {
                             requestContext.setRequestBody(new BodyInputStream(inputBuffer,bodySize));
-                            System.out.println("DISPATCH WITH BODY");
                             requestContext.dispatch();
                             state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
                             return true;
