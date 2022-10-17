@@ -6,6 +6,8 @@ import com.hedera.hashgraph.web.HttpVersion;
 import java.io.IOException;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedChannelException;
+import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
 import java.text.ParseException;
@@ -54,22 +56,7 @@ public final class InputBuffer {
     private final ByteBuffer bb;
 
     /**
-     * The index into the buffer from which we will next read a byte. Initially, this is
-     * the start of the buffer, but as bytes are read, it will eventually work its way to
-     * the latter part of the buffer, before eventually wrapping around to the start again
-     * (assuming there is more data than can be fit into the remaining space on the buffer).
-     * This index value is <strong>inclusive</strong>.
-     */
-    private int readPosition = 0;
-
-    /**
-     * The index into the buffer where the very last bytes have been written. This index is
-     * <strong>exclusive</strong>, so it is just 1 past the very last byte read.
-     */
-    private int endPosition = 0;
-
-    /**
-     * Track where the {@link #readPosition} was at the time of {@link #mark()}. -1 indicates that
+     * Track where the {@link ByteBuffer#position()} was at the time of {@link #mark()}. -1 indicates that
      * it has not been set.
      */
     private int markedPosition = -1;
@@ -88,7 +75,13 @@ public final class InputBuffer {
         }
 
         this.buffer = new byte[size];
-        this.bb = ByteBuffer.wrap(this.buffer);
+        this.bb = ByteBuffer.wrap(this.buffer).limit(0);
+    }
+
+    // TODO This was added for testing, I would prefer NOT to expose the buffer at all and find
+    //      another way to make testing happy.
+    public ByteBuffer getBuffer() {
+        return bb.asReadOnlyBuffer();
     }
 
     /**
@@ -104,12 +97,25 @@ public final class InputBuffer {
      *
      * TODO I didn't really want this to be public. Boo.
      */
-    public boolean addData(SocketChannel channel) throws IOException {
+    public boolean addData(ReadableByteChannel channel) throws IOException {
         assert channel != null : "The dispatcher should never have been able to call this with null for the channel";
 
+        // The channel must be open
+        if (!channel.isOpen()) {
+            throw new ClosedChannelException();
+        }
+
         // If the buffer is already full, we need to shift
-        if (this.endPosition == buffer.length) {
-            shift();
+        if (bb.limit() == bb.capacity()) {
+            bb.compact();
+            // If there is still no room left, then the buffer is full, and we cannot read from the
+            // channel, so we need to return true
+            if (bb.position() == bb.capacity()) {
+                bb.position(0);
+                return true;
+            } else {
+                bb.limit(bb.position()).position(0);
+            }
         }
 
         // Read as many bytes as we can
@@ -121,26 +127,27 @@ public final class InputBuffer {
         bb.limit(bb.position());
         bb.position(position);
 
-        // If these are equal, then our buffer is full, and there **may** be data left in the channel
-        // that we should select later.
-        return endPosition == buffer.length;
+        // If these are equal, then our buffer is full after reading bytes, and there **may** be data left
+        // in the channel that we should select later. We don't know for sure, so we err on the side of
+        // caution.
+        return bb.limit() == bb.capacity();
     }
 
     /**
-     * Called to reset this instance.
+     * Called to init this instance.
      */
     public void reset() {
         this.markedPosition = -1;
-        this.readPosition = 0;
-        this.endPosition = 0;
+        this.bb.clear().limit(0);
     }
 
     /**
-     * Sets the mark position to the current position in the stream. {@link #resetToMark()} will reset
+     * Sets the mark position to the current position in the stream. {@link #resetToMark()} will init
      * the stream position to the mark.
      */
     public void mark() {
-        this.markedPosition = readPosition;
+        this.markedPosition = bb.position();
+        bb.mark();
     }
 
     /**
@@ -150,10 +157,14 @@ public final class InputBuffer {
      * @return the number of bytes between current read position and last marked position
      */
     public int resetToMark() {
-        final int numMarkedBytes = this.readPosition - this.markedPosition;
-        this.readPosition = this.markedPosition;
-        this.markedPosition = -1;
-        return numMarkedBytes;
+        if (markedPosition != -1) {
+            final int numMarkedBytes = getNumMarkedBytes();
+            this.markedPosition = -1;
+            bb.reset();
+            return numMarkedBytes;
+        } else {
+            return 0;
+        }
     }
 
     /**
@@ -162,7 +173,7 @@ public final class InputBuffer {
      * @return the number of bytes between current read position and last marked position
      */
     public int getNumMarkedBytes() {
-        return this.readPosition - this.markedPosition;
+        return bb.position() - this.markedPosition;
     }
 
     /**
@@ -174,7 +185,7 @@ public final class InputBuffer {
      * @return True if that many bytes are available
      */
     public boolean available(int numBytes) {
-        return (endPosition - readPosition) >= numBytes;
+        return bb.remaining() >= numBytes;
     }
 
     /**
@@ -186,7 +197,7 @@ public final class InputBuffer {
      */
     public void skip(final int length) {
         assertAvailable(length);
-        this.readPosition += length;
+        bb.position(bb.position() + length);
     }
 
     /**
@@ -197,7 +208,7 @@ public final class InputBuffer {
      */
     public byte readByte() {
         assertAvailable(1);
-        return buffer[readPosition++];
+        return bb.get();
     }
 
     /**
@@ -209,7 +220,7 @@ public final class InputBuffer {
      */
     public byte peekByte() {
         assertAvailable(1);
-        return buffer[readPosition];
+        return bb.get(bb.position());
     }
 
     /**
@@ -221,7 +232,7 @@ public final class InputBuffer {
      */
     public byte peekByte(int numBytesToLookPast) {
         assertAvailable(1 + numBytesToLookPast);
-        return buffer[this.readPosition + numBytesToLookPast];
+        return bb.get(bb.position() + numBytesToLookPast);
     }
 
     /**
@@ -235,8 +246,7 @@ public final class InputBuffer {
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public void readBytes(byte[] dst, int dstOffset, int numBytes) {
-        peekBytes(dst, dstOffset, numBytes);
-        this.readPosition += numBytes;
+        bb.get(dst, dstOffset, numBytes);
     }
 
     /**
@@ -255,7 +265,7 @@ public final class InputBuffer {
         }
 
         assertAvailable(numBytes);
-        System.arraycopy(buffer, this.readPosition, dst, dstOffset, numBytes);
+        bb.get(bb.position(), dst, dstOffset, numBytes);
     }
 
     /**
@@ -269,7 +279,7 @@ public final class InputBuffer {
      */
     public String readString(int numBytes, Charset charset) {
         final String string = peekString(numBytes, charset);
-        this.readPosition += numBytes;
+        bb.position(bb.position() + numBytes);
         return string;
     }
 
@@ -310,20 +320,7 @@ public final class InputBuffer {
         }
 
         assertAvailable(numBytes);
-        return new String(buffer, this.readPosition, numBytes, charset);
-    }
-
-    /**
-     * Reads a single byte from the stream. The stream's read position is advanced <strong>if</strong>
-     * there is another byte to be read. If not, rather than throwing an exception, the value -1 is
-     * returned.
-     *
-     * @return A single byte, as an integer.
-     */
-    public int readByteSafely() {
-        return available(1)
-                ? (int) buffer[readPosition++]
-                : -1;
+        return new String(buffer, bb.position(), numBytes, charset);
     }
 
     /**
@@ -334,7 +331,7 @@ public final class InputBuffer {
      */
     public int read16BitInteger() {
         final var i = peek16BitInteger();
-        this.readPosition += 2;
+        bb.position(bb.position() + 2);
         return i;
     }
 
@@ -347,7 +344,7 @@ public final class InputBuffer {
      */
     public int peek16BitInteger() {
         assertAvailable(2);
-        return buffer[readPosition] << 8 | buffer[readPosition + 1];
+        return bb.get(bb.position()) << 8 | bb.get(bb.position() + 1);
     }
 
     /**
@@ -358,7 +355,7 @@ public final class InputBuffer {
      */
     public int read24BitInteger() {
         final var i = peek24BitInteger();
-        this.readPosition += 3;
+        bb.position(bb.position() + 3);
         return i;
     }
 
@@ -371,7 +368,7 @@ public final class InputBuffer {
      */
     public int peek24BitInteger() {
         assertAvailable(3);
-        return buffer[readPosition] << 16 | buffer[readPosition + 1] << 8 | buffer[readPosition + 2];
+        return bb.get(bb.position()) << 16 | bb.get(bb.position() + 1) << 8 | buffer[bb.get(bb.position() + 2)];
     }
 
     /**
@@ -383,7 +380,7 @@ public final class InputBuffer {
      */
     public int read31BitInteger() {
         final var i = peek31BitInteger();
-        this.readPosition += 4;
+        bb.position(bb.position() + 4);
         return i;
     }
 
@@ -401,6 +398,20 @@ public final class InputBuffer {
     }
 
     /**
+     * Gets an unsigned 31-bit integer from the stream <strong>without</strong> moving the read position by reading
+     * 32 bits, but ignoring the high order bit. This method is idempotent.
+     *
+     * @param numBytesToLookPast the number of bytes from the current read position to look past before peeking
+     * @return An unsigned 31-bit integer
+     * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
+     */
+    public int peek31BitInteger(int numBytesToLookPast) {
+        int result = peek32BitInteger(numBytesToLookPast);
+        result &= 0x7FFFFFFF; // Strip off the high bit, setting it to 0
+        return result;
+    }
+
+    /**
      * Reads a signed 32-bit integer from the stream by reading 32 bits.
      * The stream's read position is advanced irrevocably.
      *
@@ -409,7 +420,7 @@ public final class InputBuffer {
      */
     public int read32BitInteger() {
         final var i = peek32BitInteger();
-        this.readPosition += 4;
+        bb.position(bb.position() + 4);
         return i;
     }
 
@@ -422,10 +433,27 @@ public final class InputBuffer {
      */
     public int peek32BitInteger() {
         assertAvailable(4);
-        int result = buffer[readPosition] << 24;
-        result |= buffer[readPosition + 1] << 16;
-        result |= buffer[readPosition + 2] << 8;
-        result |= buffer[readPosition + 3];
+        int result = bb.get(bb.position()) << 24;
+        result |= bb.get(bb.position() + 1) << 16;
+        result |= bb.get(bb.position() + 2) << 8;
+        result |= bb.get(bb.position() + 3);
+        return result;
+    }
+
+    /**
+     * Gets a signed 32-bit integer from the stream <strong>without</strong> moving the read position by reading
+     * 32 bits. This method is idempotent.
+     *
+     * @param numBytesToLookPast the number of bytes from the current read position to look past before peeking
+     * @return A signed 32-bit integer
+     * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
+     */
+    public int peek32BitInteger(int numBytesToLookPast) {
+        assertAvailable(numBytesToLookPast + 4);
+        int result = bb.get(bb.position() + numBytesToLookPast) << 24;
+        result |= bb.get(bb.position() + numBytesToLookPast + 1) << 16;
+        result |= bb.get(bb.position() + numBytesToLookPast + 2) << 8;
+        result |= bb.get(bb.position() + numBytesToLookPast + 3);
         return result;
     }
 
@@ -438,7 +466,7 @@ public final class InputBuffer {
      */
     public long read32BitUnsignedInteger() {
         final var i = peek32BitUnsignedInteger();
-        this.readPosition += 4;
+        bb.position(bb.position() + 4);
         return i;
     }
 
@@ -451,10 +479,10 @@ public final class InputBuffer {
      */
     public long peek32BitUnsignedInteger() {
         assertAvailable(4);
-        long result = buffer[readPosition] << 24;
-        result |= buffer[readPosition + 1] << 16;
-        result |= buffer[readPosition + 2] << 8;
-        result |= buffer[readPosition + 3];
+        long result = bb.get(bb.position()) << 24;
+        result |= bb.get(bb.position() + 1) << 16;
+        result |= bb.get(bb.position() + 2) << 8;
+        result |= bb.get(bb.position() + 3);
         return result;
     }
 
@@ -467,7 +495,7 @@ public final class InputBuffer {
      */
     public long read64BitLong() {
         final var i = peek64BitLong();
-        this.readPosition += 8;
+        bb.position(bb.position() + 8);
         return i;
     }
 
@@ -480,14 +508,14 @@ public final class InputBuffer {
      */
     public long peek64BitLong() {
         assertAvailable(8);
-        long result = asLongNoSignExtend(buffer[readPosition]) << 56;
-        result |= asLongNoSignExtend(buffer[readPosition + 1]) << 48;
-        result |= asLongNoSignExtend(buffer[readPosition + 2]) << 40;
-        result |= asLongNoSignExtend(buffer[readPosition + 3]) << 32;
-        result |= buffer[readPosition + 4] << 24;
-        result |= buffer[readPosition + 5] << 16;
-        result |= buffer[readPosition + 6] << 8;
-        result |= buffer[readPosition + 7];
+        long result = asLongNoSignExtend(bb.get(bb.position())) << 56;
+        result |= asLongNoSignExtend(bb.get(bb.position() + 1)) << 48;
+        result |= asLongNoSignExtend(bb.get(bb.position() + 2)) << 40;
+        result |= asLongNoSignExtend(bb.get(bb.position() + 3)) << 32;
+        result |= bb.get(bb.position() + 4) << 24;
+        result |= bb.get(bb.position() + 5) << 16;
+        result |= bb.get(bb.position() + 6) << 8;
+        result |= bb.get(bb.position() + 7);
         return result;
     }
 
@@ -509,36 +537,7 @@ public final class InputBuffer {
         }
 
         assertAvailable(bytes.length);
-        return Arrays.equals(buffer, readPosition, readPosition + bytes.length, bytes, 0, bytes.length);
-    }
-
-    /**
-     * Shifts the bytes in the buffer such that the byte at {@link #readPosition} becomes the first
-     * byte in the {@link #buffer}, and all subsequent bytes until {@link #endPosition} are copied
-     * over as well.
-     */
-    private void shift() {
-        var copyFromIndex = readPosition;
-        var newReadPosition = 0;
-        var newMarkPosition = -1;
-
-        if (markedPosition >= 0) {
-            copyFromIndex = markedPosition;
-            newReadPosition = readPosition - markedPosition;
-            newMarkPosition = 0;
-        }
-
-        // Get all bytes from either the marked position (if set) or the read position
-        final var unfinishedBytes = endPosition - copyFromIndex;
-        System.arraycopy(buffer, copyFromIndex, buffer, 0, unfinishedBytes);
-
-        // The new read position has to maintain its same relative position from the marked position
-        readPosition = newReadPosition;
-        markedPosition = newMarkPosition;
-
-        // Fix the end position
-        endPosition = unfinishedBytes;
-        bb.position(endPosition);
+        return Arrays.equals(buffer, bb.position(), bb.position() + bytes.length, bytes, 0, bytes.length);
     }
 
     /**
@@ -549,7 +548,7 @@ public final class InputBuffer {
      */
     private void assertAvailable(int numBytes) {
         if (!available(numBytes)) {
-            throw new IllegalArgumentException("There are not " + numBytes + " available in the stream");
+            throw new BufferUnderflowException();
         }
     }
 
@@ -568,10 +567,13 @@ public final class InputBuffer {
     }
 
     public void init(InputBuffer in) {
-        final var length = in.endPosition - in.readPosition;
-        System.arraycopy(in.buffer, in.readPosition, buffer, 0, length);
+        final var length = in.bb.remaining();
+        System.arraycopy(in.buffer, in.bb.position(), buffer, 0, length);
         this.markedPosition = -1;
-        this.readPosition = 0;
-        this.endPosition = length;
+        bb.position(0).limit(length);
+    }
+
+    public int remaining() {
+        return bb.remaining();
     }
 }

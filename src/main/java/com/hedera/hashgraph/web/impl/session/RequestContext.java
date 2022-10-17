@@ -41,25 +41,6 @@ public abstract class RequestContext implements WebRequest {
      */
     protected HttpVersion version;
 
-    /**
-     * The request headers. This instance is reused between requests. After we read all the header data,
-     * we parse it and set the headers in this the {@link WebHeaders} instance.
-     */
-    protected final WebHeaders requestHeaders = new WebHeaders();
-
-    // =================================================================================================================
-    // Response Data
-
-    /**
-     * Set by the user when closing a request.
-     */
-    protected WebHeaders responseHeaders;
-
-    /**
-     * Set by the user when closing a request;
-     */
-    protected StatusCode responseCode;
-
     // =================================================================================================================
     // ConnectionContext Methods
 
@@ -73,24 +54,16 @@ public abstract class RequestContext implements WebRequest {
     }
 
     /**
-     * Called to reset the request context prior to its next use.
+     * Called to init the request context prior to its next use.
      */
     protected void reset() {
-        requestHeaders.clear();
         method = null;
         path = null;
         version = null;
-        responseHeaders = null;
-        responseCode = StatusCode.OK_200;
     }
 
     // =================================================================================================================
     // WebRequest Methods
-
-    @Override
-    public WebHeaders getRequestHeaders() {
-        return requestHeaders;
-    }
 
     @Override
     public String getMethod() {

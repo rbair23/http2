@@ -1,9 +1,10 @@
 package com.hedera.hashgraph.web.impl.session;
 
+import com.hedera.hashgraph.web.WebServerConfig;
 import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
-import com.hedera.hashgraph.web.impl.http2.Http2ConnectionContext;
-import com.hedera.hashgraph.web.impl.http2.Http2RequestContext;
+import com.hedera.hashgraph.web.impl.http2.Http2ConnectionImpl;
+import com.hedera.hashgraph.web.impl.http2.Http2Stream;
 
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -21,6 +22,11 @@ public final class ContextReuseManager {
     private final Dispatcher dispatcher;
 
     /**
+     * The {@link WebServerConfig} for this running server instance.
+     */
+    private final WebServerConfig config;
+
+    /**
      * Each channel has some associated data that we need to maintain. When in use, the channel data is
      * stored on the {@link java.nio.channels.SelectionKey} of the channel. When no longer in use, we want
      * to keep reference to it, so we can reuse it later. So we have a linked-list of unused {@link ConnectionContext}
@@ -34,21 +40,22 @@ public final class ContextReuseManager {
      * to keep reference to it, so we can reuse it later. So we have a linked-list of unused {@link ConnectionContext}
      * from which we can take one (from the main thread) and return one (from any of the thread in the
      */
-    private final IdleList<Http2ConnectionContext> idleHttp2ChannelContexts = new IdleList<>();
+    private final IdleList<Http2ConnectionImpl> idleHttp2ChannelContexts = new IdleList<>();
 
     /**
-     * Each {@link ConnectionContext} refers to {@link Http2RequestContext}. The number of such objects is dynamic, but we
-     * don't want to generate and allocate a lot of garbage, So we have a linked-list of unused {@link Http2RequestContext}
+     * Each {@link ConnectionContext} refers to {@link Http2Stream}. The number of such objects is dynamic, but we
+     * don't want to generate and allocate a lot of garbage, So we have a linked-list of unused {@link Http2Stream}
      * from which we can take one (from the main thread) and return one (from any of the thread in the
      */
-    private final IdleList<Http2RequestContext> idleHttp2RequestContexts = new IdleList<>();
+    private final IdleList<Http2Stream> idleHttp2RequestContexts = new IdleList<>();
 
     /**
      * Create a new instance
      *
      * @param dispatcher cannot be null
      */
-    public ContextReuseManager(final Dispatcher dispatcher) {
+    public ContextReuseManager(final Dispatcher dispatcher, final WebServerConfig config) {
+        this.config = Objects.requireNonNull(config);
         this.dispatcher = Objects.requireNonNull(dispatcher);
     }
 
@@ -75,44 +82,44 @@ public final class ContextReuseManager {
     }
 
     /**
-     * Gets an {@link Http2ConnectionContext} instance that can be used for a new channel.
+     * Gets an {@link Http2ConnectionImpl} instance that can be used for a new channel.
      * The {@link com.hedera.hashgraph.web.impl.IncomingDataHandler} is responsible to make
      * sure we don't create too many contexts.
      *
-     * @return An {@link Http2ConnectionContext} instance ready to be configured. Never null.
+     * @return An {@link Http2ConnectionImpl} instance ready to be configured. Never null.
      */
-    public Http2ConnectionContext checkoutHttp2ConnectionContext() {
+    public Http2ConnectionImpl checkoutHttp2ConnectionContext() {
         return idleHttp2ChannelContexts.checkout(
-                () -> new Http2ConnectionContext(this));
+                () -> new Http2ConnectionImpl(this, config));
     }
 
     /**
-     * Returns a previously checked out {@link Http2ConnectionContext}. Once returned, do not
+     * Returns a previously checked out {@link Http2ConnectionImpl}. Once returned, do not
      * use it again until it is re-checked out!
      *
      * @param ctx The context to return. Cannot be null.
      */
-    public void returnHttp2ConnectionContext(Http2ConnectionContext ctx) {
+    public void returnHttp2ConnectionContext(Http2ConnectionImpl ctx) {
         idleHttp2ChannelContexts.checkin(Objects.requireNonNull(ctx));
     }
 
     /**
-     * Gets a {@link Http2RequestContext} instance that can be used for a new request.
+     * Gets a {@link Http2Stream} instance that can be used for a new request.
      *
-     * @return A usable {@link Http2RequestContext} instance ready to be configured. Never null.
+     * @return A usable {@link Http2Stream} instance ready to be configured. Never null.
      */
-    public Http2RequestContext checkoutHttp2RequestContext() {
+    public Http2Stream checkoutHttp2RequestContext() {
         return idleHttp2RequestContexts.checkout(
-                () -> new Http2RequestContext(this, dispatcher));
+                () -> new Http2Stream(dispatcher));
     }
 
     /**
-     * Returns the given {@link Http2RequestContext} to the idle set.
+     * Returns the given {@link Http2Stream} to the idle set.
      *
-     * @param http2RequestContext The context to return for reuse, not null.
+     * @param http2Stream The context to return for reuse, not null.
      */
-    public void returnHttp2RequestContext(final Http2RequestContext http2RequestContext) {
-        idleHttp2RequestContexts.checkin(Objects.requireNonNull(http2RequestContext));
+    public void returnHttp2RequestContext(final Http2Stream http2Stream) {
+        idleHttp2RequestContexts.checkin(Objects.requireNonNull(http2Stream));
     }
 
     /**

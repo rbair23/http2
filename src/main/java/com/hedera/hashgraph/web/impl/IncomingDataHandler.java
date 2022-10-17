@@ -3,7 +3,7 @@ package com.hedera.hashgraph.web.impl;
 import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.WebServerConfig;
 import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
-import com.hedera.hashgraph.web.impl.http2.Http2ConnectionContext;
+import com.hedera.hashgraph.web.impl.http2.Http2ConnectionImpl;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
 import com.hedera.hashgraph.web.impl.session.HandleResponse;
@@ -84,7 +84,7 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
         this.dispatcher = Objects.requireNonNull(dispatcher);
         this.channelManager = Objects.requireNonNull(channelManager);
         this.availableConnections = new AtomicInteger(config.maxIdleConnections());
-        this.contextReuseManager = new ContextReuseManager(dispatcher);
+        this.contextReuseManager = new ContextReuseManager(dispatcher, config);
     }
 
     /**
@@ -142,7 +142,7 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
     private void upgradeHttpVersion(final HttpVersion version, final SelectionKey key) {
         if (version == HttpVersion.HTTP_2) {
             Http1ConnectionContext currentConnectionContext = (Http1ConnectionContext) key.attachment();
-            Http2ConnectionContext http2ChannelSession = contextReuseManager.checkoutHttp2ConnectionContext();
+            Http2ConnectionImpl http2ChannelSession = contextReuseManager.checkoutHttp2ConnectionContext();
             http2ChannelSession.reset((SocketChannel) key.channel(), availableConnections::incrementAndGet);
             key.attach(http2ChannelSession);
             http2ChannelSession.upgrade(currentConnectionContext);
