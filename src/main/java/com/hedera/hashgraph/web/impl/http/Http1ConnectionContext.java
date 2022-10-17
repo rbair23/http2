@@ -24,6 +24,13 @@ import static com.hedera.hashgraph.web.impl.http.Http1Constants.*;
  * <ul>
  *     <li><a href="https://httpwg.org/specs/rfc9110.html#trailer.fields">Trailer Fields</a></li>
  * </ul>
+ * There is two ways of doing multiple requests with HTTP 1.1:
+ * <ul>
+ *     <li>One complete request response followed by another.</li>
+ *     <li>One stream of requests and one of responses. As long as responses are in same order as requests. This is
+ *     called "Pipelining" in the spec and seems to have been abandoned so we will only support the first mode.
+ *     <a href="https://en.m.wikipedia.org/wiki/HTTP_pipelining"></a></li>
+ * </ul>
  */
 public class Http1ConnectionContext extends ConnectionContext {
 

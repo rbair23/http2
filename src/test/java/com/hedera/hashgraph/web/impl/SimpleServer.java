@@ -43,7 +43,7 @@ public class SimpleServer {
     private void close(SelectionKey key) {
         // CLOSE CHANNEL
         try {
-            key.cancel();
+            key.cancel(); // TODO test if needed
             key.channel().close();
         } catch (IOException e) {
             System.err.println("Error during closing SelectionKey: " + key);
@@ -92,7 +92,7 @@ public class SimpleServer {
                                 accept(key);
                             } else if (key.isReadable()) {
                                 read(key);
-                            } else if (key.isWritable()) {
+                            } else if (key.isWritable()) { // TODO test if needed
                                 write(key);
                             }
                         } else {
