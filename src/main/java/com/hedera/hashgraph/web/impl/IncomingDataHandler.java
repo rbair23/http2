@@ -6,6 +6,7 @@ import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.Http2ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
+import com.hedera.hashgraph.web.impl.session.HandleResponse;
 
 import java.io.IOException;
 import java.nio.channels.SelectionKey;
@@ -13,7 +14,7 @@ import java.nio.channels.SocketChannel;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Predicate;
+import java.util.function.Function;
 
 /**
  * Coordinates the work of the {@link ChannelManager} (which handles all networking connections with the clients),
@@ -27,7 +28,7 @@ import java.util.function.Predicate;
 public final class IncomingDataHandler implements Runnable, AutoCloseable {
     /**
      * The time we want to allow the {@link ChannelManager} to block waiting for connections
-     * in {@link ChannelManager#checkConnections(Duration, AtomicInteger, Predicate)}, before giving up if all
+     * in {@link ChannelManager#checkConnections(Duration, AtomicInteger, Function)}, before giving up if all
      * connections are idle. This is low enough so when a server is stopped, it stops relatively
      * quickly, but long enough to keep us from a horrible busy loop consuming the CPU needlessly.
      */
@@ -113,11 +114,14 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
                             key.attach(connectionContext);
                             availableConnections.decrementAndGet();
                         }
-                        
-                        // Delegate to the context to handle the input!
-                        return connectionContext.handle(httpVersion -> upgradeHttpVersion(httpVersion, key));
+                        if (channel.isOpen()) {
+                            // Delegate to the context to handle the input!
+                            return connectionContext.handle(httpVersion -> upgradeHttpVersion(httpVersion, key));
+                        } else {
+                            return HandleResponse.CLOSE_CONNECTION;
+                        }
                     }
-                    return true;
+                    return HandleResponse.ALL_DATA_READ;
                 });
             }
         } catch (IOException fatal) {

@@ -30,6 +30,7 @@ import java.util.function.Consumer;
  * the contents to send to the channel, and then sends them as a complete {@link ByteBuffer} of data.
  */
 public abstract class ConnectionContext implements AutoCloseable {
+
     /**
      * The {@link ContextReuseManager} that manages this instance. This instance will be returned to the
      * {@link ContextReuseManager} when it is closed.
@@ -86,19 +87,26 @@ public abstract class ConnectionContext implements AutoCloseable {
      *
      * @param onConnectionUpgrade A callback to be invoked if the context needs to be upgraded. For example,
      *                            the HTTP/1.1 context may invoke this to upgrade to HTTP/2.0.
-     * @return true if some data has not been read from the socket
+     * @return If handle has read all data, left data still to read or wants the connection to be closed.
      */
-    public boolean handle(final Consumer<HttpVersion> onConnectionUpgrade) {
+    public HandleResponse handle(final Consumer<HttpVersion> onConnectionUpgrade) {
         try {
             // Put the data into the input stream
             final var dataRemains = inputBuffer.addData(channel);
-            final var notEverythingHandled = doHandle(onConnectionUpgrade);
-            return dataRemains || notEverythingHandled;
+            final var doHandleResponse = doHandle(onConnectionUpgrade);
+            if (doHandleResponse == HandleResponse.CLOSE_CONNECTION) {
+                close();
+                return HandleResponse.CLOSE_CONNECTION;
+            } else if (dataRemains || doHandleResponse == HandleResponse.DATA_STILL_TO_READ) {
+                return HandleResponse.DATA_STILL_TO_READ;
+            } else {
+                return HandleResponse.ALL_DATA_READ;
+            }
         } catch (IOException e) {
             // The underlying channel is closed, we need to clean things up
             e.printStackTrace(); // LOGGING: Need to log this, maybe as trace or debug
             close();
-            return false;
+            return HandleResponse.CLOSE_CONNECTION;
         }
     }
 
@@ -108,9 +116,9 @@ public abstract class ConnectionContext implements AutoCloseable {
      *
      * @param onConnectionUpgrade A callback to be invoked if the context needs to be upgraded. For example,
      *                            the HTTP/1.1 context may invoke this to upgrade to HTTP/2.0.
-     * @return true if some data has not been fully processed
+     * @return If handle has read all data, left data still to read or wants the connection to be closed.
      */
-    public abstract boolean doHandle(final Consumer<HttpVersion> onConnectionUpgrade);
+    public abstract HandleResponse doHandle(final Consumer<HttpVersion> onConnectionUpgrade);
 
     /**
      * Resets the state of this channel before being reused. Called by the {@link ContextReuseManager} only.
@@ -129,6 +137,7 @@ public abstract class ConnectionContext implements AutoCloseable {
 
     @Override
     public void close() {
+        System.out.println("ConnectionContext.close");
         if (!closed) {
             this.closed = true;
 

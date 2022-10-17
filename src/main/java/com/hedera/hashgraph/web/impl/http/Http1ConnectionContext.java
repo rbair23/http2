@@ -1,18 +1,18 @@
 package com.hedera.hashgraph.web.impl.http;
 
+import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.ResponseAlreadySentException;
 import com.hedera.hashgraph.web.StatusCode;
 import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.impl.Dispatcher;
-import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
+import com.hedera.hashgraph.web.impl.session.HandleResponse;
 
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static com.hedera.hashgraph.web.impl.http.Http1Constants.*;
@@ -35,8 +35,7 @@ public class Http1ConnectionContext extends ConnectionContext {
         HTTP2_PREFACE,
         HEADER_KEY,
         HEADER_VALUE,
-        WAITING_FOR_END_OF_REQUEST_BODY,
-        WAITING_FOR_RESPONSE_TO_BE_SENT
+        WAITING_FOR_END_OF_REQUEST_BODY
     };
 
     /** Parsing state machine current state */
@@ -47,7 +46,7 @@ public class Http1ConnectionContext extends ConnectionContext {
 
     private final Http1RequestContext requestContext;
 
-    private final AtomicBoolean responseSent = new AtomicBoolean();
+    private boolean isKeepAlive = false;
 
     /**
      * Create a new instance.
@@ -57,7 +56,15 @@ public class Http1ConnectionContext extends ConnectionContext {
      */
     public Http1ConnectionContext(final ContextReuseManager contextReuseManager, final Dispatcher dispatcher) {
         super(contextReuseManager, 16*1024);
-        this.requestContext = new Http1RequestContext(dispatcher, outputBuffer, () -> responseSent.set(true));
+        this.requestContext = new Http1RequestContext(dispatcher, outputBuffer, () -> {
+            if (isKeepAlive) {
+                state = State.BEGIN;
+                tempHeaderKey = null;
+                isKeepAlive = false;
+            } else {
+                close();
+            }
+        });
     }
 
     @Override
@@ -65,7 +72,7 @@ public class Http1ConnectionContext extends ConnectionContext {
         super.reset(channel, onCloseCallback);
         state = State.BEGIN;
         tempHeaderKey = null;
-        responseSent.set(false);
+        isKeepAlive = false;
         requestContext.setChannel(channel);
     }
 
@@ -76,7 +83,7 @@ public class Http1ConnectionContext extends ConnectionContext {
     }
 
     @Override
-    public boolean doHandle(Consumer<HttpVersion> onConnectionUpgrade) {
+    public HandleResponse doHandle(Consumer<HttpVersion> onConnectionUpgrade) {
         //         generic-message = start-line
         //                          *(message-header CRLF)
         //                          CRLF
@@ -85,6 +92,7 @@ public class Http1ConnectionContext extends ConnectionContext {
         // loop while there is still data to process, we can go through multiple states
         try {
             while (inputBuffer.available(1)) {
+//                System.out.println("state = " + state);
                 switch (state) {
                     case BEGIN:
                         inputBuffer.mark();
@@ -136,14 +144,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                                 inputBuffer.skip(2);
                                 // handle versions
                                 switch (requestContext.getVersion()) {
-                                    case HTTP_1 -> {
-                                        return respondWithError(StatusCode.UPGRADE_REQUIRED_426,
-                                                new WebHeaders()
-                                                        .put("Upgrade","HTTP/1.1, HTTP/2.0")
-                                                        .put("Connection","Upgrade"),
-                                                "This service requires use of the HTTP/1.1 or HTTP/2.0 protocol.");
-                                    }
-                                    case HTTP_1_1 -> {
+                                    case HTTP_1, HTTP_1_1 -> {
                                         // next state
                                         inputBuffer.mark();
                                         state = State.HEADER_KEY;
@@ -169,7 +170,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                             }
                             // full preface read, now hand over to http 2 handler
                             onConnectionUpgrade.accept(HttpVersion.HTTP_2);
-                            return false;
+                            return HandleResponse.ALL_DATA_READ;
                         }
                         break;
                     case HEADER_KEY:
@@ -183,6 +184,9 @@ public class Http1ConnectionContext extends ConnectionContext {
                                     // we are now ready for body
                                     inputBuffer.mark();
 //                                    System.out.println("requestContext.getRequestHeaders() = " + requestContext.getRequestHeaders());
+                                    // check headers
+                                    isKeepAlive = requestContext.getRequestHeaders().getKeepAlive();
+//                                    System.out.println("isKeepAlive = " + isKeepAlive);
                                     // check if there is a request body to read
                                     final int bodySize = requestContext.getRequestHeaders().getContentLength();
 //                                    System.out.println("bodySize = " + bodySize);
@@ -191,12 +195,14 @@ public class Http1ConnectionContext extends ConnectionContext {
                                             requestContext.setRequestBody(new BodyInputStream(inputBuffer, bodySize));
                                         } else {
                                             state = State.WAITING_FOR_END_OF_REQUEST_BODY;
-                                            return false;
+                                            return HandleResponse.ALL_DATA_READ;
                                         }
                                     }
+                                    // dispatch
                                     requestContext.dispatch();
-                                    state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
-                                    return true;
+                                    // we have done our job reading data, now up to dispatcher to send response and the
+                                    // call callback.
+                                    return HandleResponse.ALL_DATA_READ;
                                 } else {
                                     respondWithError(StatusCode.BAD_REQUEST_400);
                                 }
@@ -233,34 +239,27 @@ public class Http1ConnectionContext extends ConnectionContext {
                         if (inputBuffer.available(bodySize)) {
                             requestContext.setRequestBody(new BodyInputStream(inputBuffer,bodySize));
                             requestContext.dispatch();
-                            state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
-                            return true;
+                            // we have done our job reading data, now up to dispatcher to send response and the
+                            // call callback.
+                            return HandleResponse.ALL_DATA_READ;
                         }
-                    case WAITING_FOR_RESPONSE_TO_BE_SENT:
-                        if (responseSent.get()) {
-                            // reset for next HTTP 1.1 request
-                            reset(channel,null);
-                        } else {
-                            return true; // waiting for response to be sent
-                        }
+                        break;
                 }
             }
         } catch (ResponseAlreadySentException e) {
             e.printStackTrace();
         }
-        return false;
+        return HandleResponse.ALL_DATA_READ;
     }
 
-    private boolean respondWithError(StatusCode statusCode) {
-        state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
+    private HandleResponse respondWithError(StatusCode statusCode) {
         requestContext.respond(statusCode);
-        return true;
+        return isKeepAlive ? HandleResponse.ALL_DATA_READ : HandleResponse.CLOSE_CONNECTION;
     }
 
-    private boolean respondWithError(StatusCode statusCode, WebHeaders webHeaders, String bodyMessage) {
-        state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
+    private HandleResponse respondWithError(StatusCode statusCode, WebHeaders webHeaders, String bodyMessage) {
         requestContext.respond(statusCode,webHeaders,bodyMessage);
-        return true;
+        return isKeepAlive ? HandleResponse.ALL_DATA_READ : HandleResponse.CLOSE_CONNECTION;
     }
 
 

@@ -90,7 +90,17 @@ class EchoTest {
     }
 
     public static void main(String[] args) throws IOException {
-        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
+        WebServer server = new WebServer("localhost", 54321);
+        server.getRoutes().get("/hello", request -> {
+            // create response
+            byte[] hello = "Hello back to you!".getBytes(StandardCharsets.US_ASCII);
+            final WebHeaders responseHeaders = new WebHeaders();
+            responseHeaders.setContentLength(hello.length);
+            responseHeaders.setContentType("text/plain");
+            try(final OutputStream out = request.startResponse(StatusCode.OK_200,responseHeaders)) {
+                out.write(hello);
+            }
+        });
         server.getRoutes().post("/echo", request -> {
             final int contentSize = request.getRequestHeaders().getContentLength();
             System.out.println("contentSize = " + contentSize);

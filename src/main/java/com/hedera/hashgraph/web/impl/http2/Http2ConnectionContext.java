@@ -6,13 +6,12 @@ import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.frames.*;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
-import com.hedera.hashgraph.web.impl.util.InputBuffer;
+import com.hedera.hashgraph.web.impl.session.HandleResponse;
 
 import java.io.IOException;
 import java.nio.channels.SocketChannel;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
@@ -117,7 +116,7 @@ public final class Http2ConnectionContext extends ConnectionContext {
 
     // NOTE: Once in this context, we never perform an upgrade
     @Override
-    public boolean handle(Consumer<HttpVersion> ignored) {
+    public HandleResponse handle(Consumer<HttpVersion> ignored) {
         try {
             var needMoreData = false;
             while (!needMoreData) {
@@ -189,12 +188,12 @@ public final class Http2ConnectionContext extends ConnectionContext {
                 close();
             }
         }
-        return false;
+        return HandleResponse.ALL_DATA_READ;
     }
 
     @Override
-    public boolean doHandle(Consumer<HttpVersion> onConnectionUpgrade) {
-        return false;
+    public HandleResponse doHandle(Consumer<HttpVersion> onConnectionUpgrade) {
+        return HandleResponse.ALL_DATA_READ;
     }
 
 

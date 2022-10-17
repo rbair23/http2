@@ -1,0 +1,15 @@
+POST http://localhost:54321/echo
+Content-Type: text/plain
+
+This is a test POST with some text!
+
+###
+GET http://localhost:54321/hello
+Accept: text/plain
+
+###
+GET http://localhost:54321/hello
+Accept: text/plain
+Connection: close
+
+###

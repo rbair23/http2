@@ -1,14 +1,14 @@
 package com.hedera.hashgraph.web.impl;
 
+import com.hedera.hashgraph.web.impl.session.HandleResponse;
+
 import java.io.IOException;
-import java.nio.channels.ClosedChannelException;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.*;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Predicate;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 
 /**
  * Manages the set of all open connections on a single {@link ServerSocketChannel}. Listens to "accept"
@@ -61,7 +61,7 @@ public final class ChannelManager implements AutoCloseable {
 
     /**
      * Threadsafe method to terminate any processing being done by this class and interrupt
-     * the {@link #checkConnections(Duration, AtomicInteger, Predicate)} method, if it is blocking.
+     * the {@link #checkConnections(Duration, AtomicInteger, Function)} method, if it is blocking.
      */
     public void close() {
         this.shutdown = true;
@@ -94,7 +94,7 @@ public final class ChannelManager implements AutoCloseable {
     public void checkConnections(
             final Duration timeout,
             final AtomicInteger availableConnectionCount,
-            final Predicate<SelectionKey> onRead) throws IOException {
+            final Function<SelectionKey, HandleResponse> onRead) throws IOException {
         // TODO does the onRead need to tell me whether data was actually read or not? I think probably it does,
         //      otherwise I maybe shouldn't remove the key from the iterator...
 
@@ -123,23 +123,35 @@ public final class ChannelManager implements AutoCloseable {
 
             // If the key in the set is the "acceptKey", then we have a new connection to accept.
             // To accept a connection, we will need to get the socket channel
-            if (key == acceptKey && availableConnectionCount.get() > 0) {
-                itr.remove();
-                accept();
-            } else if (key.isReadable()) {
-                if (!onRead.test(key)) {
+            try {
+                if (!key.isValid()) {
+                    System.out.println("NON VALID KEY FOUND");
                     itr.remove();
+                } else if (key == acceptKey && availableConnectionCount.get() > 0) {
+                    itr.remove();
+                    accept();
+                } else if (key.isReadable()) {
+                    final HandleResponse readResponse = onRead.apply(key);
+                    if (readResponse == HandleResponse.ALL_DATA_READ || readResponse == HandleResponse.CLOSE_CONNECTION) {
+                        itr.remove();
+                    }
                 }
+            } catch (CancelledKeyException cancelledKeyException) {
+                cancelledKeyException.printStackTrace();
+                System.out.println("NON VALID KEY FOUND");
+                itr.remove();
             }
         }
     }
+
+    private final AtomicLong count = new AtomicLong(0);
 
     /**
      * Accepts a new socket connection, registering to listen to read events on it.
      */
     private void accept() {
         try {
-            System.out.println("New connection accepted");
+            System.out.println("New connection "+count.incrementAndGet()+" accepted");
             // Go ahead and accept the socket channel and configure it
             // TODO Make sure we have a configured upper limit on number of active connections
             // and keep track of that information

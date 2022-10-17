@@ -135,6 +135,11 @@ public final class WebHeaders {
         return this;
     }
 
+    public boolean getKeepAlive() {
+        final String connectionHeader = headers.get("connection");
+        return connectionHeader != null && connectionHeader.toLowerCase().contains("keep-alive");
+    }
+
     @Override
     public String toString() {
         return "WebHeaders{" +
