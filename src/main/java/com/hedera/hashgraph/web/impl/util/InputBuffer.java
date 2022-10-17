@@ -85,6 +85,23 @@ public final class InputBuffer {
     }
 
     /**
+     * Initialized this {@link InputBuffer} with the data and settings of the given buffer.
+     *
+     * @param other The buffer to copy. Must not be null.
+     */
+    public void init(InputBuffer other) {
+        final var length = other.bb.remaining();
+        if (length > bb.capacity()) {
+            throw new ArrayIndexOutOfBoundsException("The source buffer has more data to copy than the target" +
+                    "buffer can accept");
+        }
+
+        System.arraycopy(other.buffer, other.bb.position(), buffer, 0, length);
+        this.markedPosition = -1;
+        bb.position(0).limit(length);
+    }
+
+    /**
      * Called by the {@link Dispatcher} when new data is available for this connection. The stream will
      * attempt to load as much data as possible from the connection into the buffer. If the buffer is
      * already full, then unread data (either starting from the mark position, if set, or the current
@@ -189,6 +206,16 @@ public final class InputBuffer {
     }
 
     /**
+     * Gets the number of bytes remaining to be read. {@code available(remaining())} will always
+     * return true.
+     *
+     * @return The number of bytes to read.
+     */
+    public int remaining() {
+        return bb.remaining();
+    }
+
+    /**
      * Skips over {@code length} bytes in the stream. If {@code length} is greater than the
      * available bytes in the stream, an exception is thrown.
      *
@@ -278,31 +305,13 @@ public final class InputBuffer {
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public String readString(int numBytes, Charset charset) {
+        if (numBytes <= 0) {
+            return "";
+        }
+
         final String string = peekString(numBytes, charset);
         bb.position(bb.position() + numBytes);
         return string;
-    }
-
-    public HttpVersion readVersion() throws ParseException {
-        // "HTTP/1.0"
-        if (readByte() != 'H') throw new ParseException("Bad Version",0);
-        if (readByte() != 'T') throw new ParseException("Bad Version",1);
-        if (readByte() != 'T') throw new ParseException("Bad Version",2);
-        if (readByte() != 'P') throw new ParseException("Bad Version",3);
-        if (readByte() != '/') throw new ParseException("Bad Version",4);
-        int majorChar = readByte();
-        int charAfterDigit = peekByte();
-        if (charAfterDigit == '\r' && majorChar == '2') {
-            // sometimes version is just "HTTP/2" which is not valid but is in use
-            return HttpVersion.HTTP_2;
-        } else {
-            if (readByte() != '.') throw new ParseException("Bad Version", 4);
-            int minorChar = readByte();
-            if (majorChar == '1' && minorChar == '0') return HttpVersion.HTTP_1;
-            if (majorChar == '1' && minorChar == '1') return HttpVersion.HTTP_1_1;
-            if (majorChar == '2' && minorChar == '0') return HttpVersion.HTTP_2;
-        }
-        return null;
     }
 
     /**
@@ -321,6 +330,40 @@ public final class InputBuffer {
 
         assertAvailable(numBytes);
         return new String(buffer, bb.position(), numBytes, charset);
+    }
+
+    /**
+     * Reads an HTTP version sequence from the buffer, or throws a parse exception if it cannot.
+     * The bytes required for the HTTP string must already have been loaded.
+     *
+     * @return The HttpVersion, or null if the version was semantically correct but didn't match one
+     *         of our known versions.
+     * @throws ParseException If the bytes being read are not semantically an HTTP version string
+     * @throws BufferUnderflowException If enough bytes are not available to parse the complete version string
+     */
+    public HttpVersion readVersion() throws ParseException {
+        // "HTTP/1.0"
+        if (readByte() != 'H') throw new ParseException("Bad Version", 0);
+        if (readByte() != 'T') throw new ParseException("Bad Version", 1);
+        if (readByte() != 'T') throw new ParseException("Bad Version", 2);
+        if (readByte() != 'P') throw new ParseException("Bad Version", 3);
+        if (readByte() != '/') throw new ParseException("Bad Version", 4);
+        int majorChar = readByte();
+        int charAfterDigit = peekByte();
+        if (charAfterDigit == '\r' && majorChar == '2') {
+            // sometimes version is just "HTTP/2" which is not valid but is in use
+            return HttpVersion.HTTP_2;
+        } else {
+            if (!Character.isDigit(majorChar)) throw new ParseException("Bad Major Number", 5);
+            if (readByte() != '.') throw new ParseException("Bad Version", 6);
+            int minorChar = readByte();
+            if (!Character.isDigit(minorChar)) throw new ParseException("Bad Minor Number", 7);
+            if (majorChar == '1' && minorChar == '0') return HttpVersion.HTTP_1;
+            if (majorChar == '1' && minorChar == '1') return HttpVersion.HTTP_1_1;
+            if (majorChar == '2' && minorChar == '0') return HttpVersion.HTTP_2;
+        }
+
+        return null;
     }
 
     /**
@@ -344,7 +387,9 @@ public final class InputBuffer {
      */
     public int peek16BitInteger() {
         assertAvailable(2);
-        return bb.get(bb.position()) << 8 | bb.get(bb.position() + 1);
+        int result = bb.get(bb.position()) << 8;
+        result |= bb.get(bb.position() + 1);
+        return result & 0x0000FFFF; // Mask off the upper bits, in case of negative sign extension
     }
 
     /**
@@ -368,7 +413,10 @@ public final class InputBuffer {
      */
     public int peek24BitInteger() {
         assertAvailable(3);
-        return bb.get(bb.position()) << 16 | bb.get(bb.position() + 1) << 8 | buffer[bb.get(bb.position() + 2)];
+        int result = bb.get(bb.position()) << 16;
+        result |= bb.get(bb.position() + 1) << 8;
+        result |= bb.get(bb.position() + 2);
+        return result & 0x0000FFFF; // Mask off the upper bits, in case of negative sign extension
     }
 
     /**
@@ -392,9 +440,8 @@ public final class InputBuffer {
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public int peek31BitInteger() {
-        int result = peek32BitInteger();
-        result &= 0x7FFFFFFF; // Strip off the high bit, setting it to 0
-        return result;
+        assertAvailable(4);
+        return peek31BitInteger(0);
     }
 
     /**
@@ -406,8 +453,11 @@ public final class InputBuffer {
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public int peek31BitInteger(int numBytesToLookPast) {
-        int result = peek32BitInteger(numBytesToLookPast);
-        result &= 0x7FFFFFFF; // Strip off the high bit, setting it to 0
+        assertAvailable(4);
+        int result = (bb.get(bb.position() + numBytesToLookPast) << 24) & 0xFF000000;
+        result |= (bb.get(bb.position() + numBytesToLookPast + 1) << 16) & 0x00FF0000;
+        result |= (bb.get(bb.position() + numBytesToLookPast + 2) << 8) & 0x0000FF00;
+        result |= (bb.get(bb.position() + numBytesToLookPast + 3)) & 0x000000FF;
         return result;
     }
 
@@ -433,27 +483,10 @@ public final class InputBuffer {
      */
     public int peek32BitInteger() {
         assertAvailable(4);
-        int result = bb.get(bb.position()) << 24;
-        result |= bb.get(bb.position() + 1) << 16;
-        result |= bb.get(bb.position() + 2) << 8;
-        result |= bb.get(bb.position() + 3);
-        return result;
-    }
-
-    /**
-     * Gets a signed 32-bit integer from the stream <strong>without</strong> moving the read position by reading
-     * 32 bits. This method is idempotent.
-     *
-     * @param numBytesToLookPast the number of bytes from the current read position to look past before peeking
-     * @return A signed 32-bit integer
-     * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
-     */
-    public int peek32BitInteger(int numBytesToLookPast) {
-        assertAvailable(numBytesToLookPast + 4);
-        int result = bb.get(bb.position() + numBytesToLookPast) << 24;
-        result |= bb.get(bb.position() + numBytesToLookPast + 1) << 16;
-        result |= bb.get(bb.position() + numBytesToLookPast + 2) << 8;
-        result |= bb.get(bb.position() + numBytesToLookPast + 3);
+        int result = (bb.get(bb.position()) << 24) & 0xFF000000;
+        result |= (bb.get(bb.position() + 1) << 16) & 0x00FF0000;
+        result |= (bb.get(bb.position() + 2) << 8) & 0x0000FF00;
+        result |= (bb.get(bb.position() + 3)) & 0x000000FF;
         return result;
     }
 
@@ -479,10 +512,10 @@ public final class InputBuffer {
      */
     public long peek32BitUnsignedInteger() {
         assertAvailable(4);
-        long result = bb.get(bb.position()) << 24;
-        result |= bb.get(bb.position() + 1) << 16;
-        result |= bb.get(bb.position() + 2) << 8;
-        result |= bb.get(bb.position() + 3);
+        long result = (bb.get(bb.position()) << 24) & 0xFF000000;
+        result |= (bb.get(bb.position() + 1) << 16) & 0x00FF0000;
+        result |= (bb.get(bb.position() + 2) << 8) & 0x0000FF00;
+        result |= (bb.get(bb.position() + 3)) & 0x000000FF;
         return result;
     }
 
@@ -508,36 +541,15 @@ public final class InputBuffer {
      */
     public long peek64BitLong() {
         assertAvailable(8);
-        long result = asLongNoSignExtend(bb.get(bb.position())) << 56;
-        result |= asLongNoSignExtend(bb.get(bb.position() + 1)) << 48;
-        result |= asLongNoSignExtend(bb.get(bb.position() + 2)) << 40;
-        result |= asLongNoSignExtend(bb.get(bb.position() + 3)) << 32;
-        result |= bb.get(bb.position() + 4) << 24;
-        result |= bb.get(bb.position() + 5) << 16;
-        result |= bb.get(bb.position() + 6) << 8;
-        result |= bb.get(bb.position() + 7);
+        long result = ((long) bb.get(bb.position()) << 56) & 0xFF00000000000000L;
+        result |= ((long) bb.get(bb.position() + 1) << 48) & 0x00FF000000000000L;
+        result |= ((long) bb.get(bb.position() + 2) << 40) & 0x0000FF0000000000L;
+        result |= ((long) bb.get(bb.position() + 3) << 32) & 0x000000FF00000000L;
+        result |= (bb.get(bb.position() + 4) << 24) & 0x00000000FF000000L;
+        result |= (bb.get(bb.position() + 5) << 16) & 0x0000000000FF0000L;
+        result |= (bb.get(bb.position() + 6) << 8) & 0x000000000000FF00L;
+        result |= (bb.get(bb.position() + 7)) & 0x00000000000000FFL;
         return result;
-    }
-
-    /**
-     * Checks whether the stream, starting from the current position in the stream, matches exactly the elements
-     * of the given byte array. This method <strong>does not</strong> advance the read position in the stream, so
-     * it acts as a peek or look-ahead.
-     *
-     * @param bytes The bytes to look up. Cannot be null, and must be less than the size configured in this stream's
-     *              constructor.
-     * @return true if and only if, starting from the current read position, every byte exactly matches the bytes
-     *         in the given array.
-     * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
-     * @throws IllegalArgumentException If the given byte array is too large
-     */
-    public boolean prefixMatch(final byte[] bytes) {
-        if (buffer.length < bytes.length) {
-            throw new IllegalArgumentException("The supplied byte array was larger than the buffer of this stream");
-        }
-
-        assertAvailable(bytes.length);
-        return Arrays.equals(buffer, bb.position(), bb.position() + bytes.length, bytes, 0, bytes.length);
     }
 
     /**
@@ -550,30 +562,5 @@ public final class InputBuffer {
         if (!available(numBytes)) {
             throw new BufferUnderflowException();
         }
-    }
-
-    /**
-     * Little utility to make sure we can read a byte and shift it into a long without sign extension.
-     *
-     * @param b The byte to extend
-     * @return A long with no signed extension
-     */
-    private long asLongNoSignExtend(byte b) {
-        if (b < 0) {
-            return  0x8L | (b & 0x7F);
-        } else {
-            return b;
-        }
-    }
-
-    public void init(InputBuffer in) {
-        final var length = in.bb.remaining();
-        System.arraycopy(in.buffer, in.bb.position(), buffer, 0, length);
-        this.markedPosition = -1;
-        bb.position(0).limit(length);
-    }
-
-    public int remaining() {
-        return bb.remaining();
     }
 }
