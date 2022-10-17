@@ -209,7 +209,8 @@ public class GrpcRouter {
                 @Override
                 public OutputStream startResponse(GrpcStatus status) throws IOException {
                     // TODO gotta do some more work on this...
-                    return req.startResponse(StatusCode.OK_200, WebRequest.EMPTY_HEADERS);
+//                    return req.startResponse(StatusCode.OK_200, WebRequest.EMPTY_HEADERS);
+                    return null;
                 }
             });
         } catch (GrpcException e) {

@@ -4,7 +4,7 @@ import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.HttpVersion;
 
 import java.io.IOException;
-import java.net.SocketException;
+import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
@@ -113,15 +113,13 @@ public final class InputBuffer {
         }
 
         // Read as many bytes as we can
-        try {
-            final var numReadBytes = channel.read(bb);
-            if (numReadBytes > 1) {
-                // We read something, so that is good. Update the endPosition
-                endPosition += numReadBytes;
-            }
-        } catch (SocketException se) {
-            se.printStackTrace();
-        }
+        final int position = bb.position();
+        final int limit = bb.limit();
+        bb.position(limit);
+        bb.limit(bb.capacity());
+        channel.read(bb);
+        bb.limit(bb.position());
+        bb.position(position);
 
         // If these are equal, then our buffer is full, and there **may** be data left in the channel
         // that we should select later.

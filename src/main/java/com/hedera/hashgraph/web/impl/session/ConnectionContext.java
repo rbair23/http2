@@ -7,7 +7,7 @@ import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.SocketChannel;
+import java.nio.channels.ByteChannel;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -39,23 +39,23 @@ public abstract class ConnectionContext implements AutoCloseable {
 
     /**
      * The buffered input for this connection. This is a single instance for the lifecycle of the context.
-     * When this {@link ConnectionContext} is closed, the input buffer is reset in anticipation of the next channel
+     * When this {@link ConnectionContext} is closed, the input buffer is init in anticipation of the next channel
      * to be serviced.
      */
     protected final InputBuffer inputBuffer;
 
     /**
      * The buffered output for this connection. This is a single instance for the lifecycle of the context.
-     * When this {@link ConnectionContext} is closed, the output buffer is reset in anticipation of the next channel
+     * When this {@link ConnectionContext} is closed, the output buffer is init in anticipation of the next channel
      * to be serviced. The contents of this buffer are for the communication that belongs to the connection.
      * In HTTP/2.0, these would be connection frames. Stream frames would be in their own buffers.
      */
     protected final OutputBuffer outputBuffer;
 
     /**
-     * The underlying {@link SocketChannel} that we use for reading and writing data.
+     * The underlying {@link ByteChannel} that we use for reading and writing data.
      */
-    protected SocketChannel channel;
+    protected ByteChannel channel;
 
     /**
      * A callback invoked when the context is closed.
@@ -65,7 +65,7 @@ public abstract class ConnectionContext implements AutoCloseable {
 
     /**
      * Keeps track of whether the instance is closed. Set to true in {@link #close()} and set to
-     * false in {@link #reset(SocketChannel, Runnable)}.
+     * false in {@link #reset(ByteChannel, Runnable)}.
      */
     private boolean closed = true;
 
@@ -89,7 +89,7 @@ public abstract class ConnectionContext implements AutoCloseable {
      *                            the HTTP/1.1 context may invoke this to upgrade to HTTP/2.0.
      * @return If handle has read all data, left data still to read or wants the connection to be closed.
      */
-    public HandleResponse handle(final Consumer<HttpVersion> onConnectionUpgrade) {
+    public final HandleResponse handle(final Consumer<HttpVersion> onConnectionUpgrade) {
         try {
             // Put the data into the input stream
             final var dataRemains = inputBuffer.addData(channel);
@@ -107,6 +107,11 @@ public abstract class ConnectionContext implements AutoCloseable {
             e.printStackTrace(); // LOGGING: Need to log this, maybe as trace or debug
             close();
             return HandleResponse.CLOSE_CONNECTION;
+        } catch (FailedFlushException e) {
+            // We failed to flush, most likely because the channel is closed. So close the
+            // connection and give up.
+            close();
+            return HandleResponse.CLOSE_CONNECTION;
         }
     }
 
@@ -118,7 +123,7 @@ public abstract class ConnectionContext implements AutoCloseable {
      *                            the HTTP/1.1 context may invoke this to upgrade to HTTP/2.0.
      * @return If handle has read all data, left data still to read or wants the connection to be closed.
      */
-    public abstract HandleResponse doHandle(final Consumer<HttpVersion> onConnectionUpgrade);
+    protected abstract HandleResponse doHandle(final Consumer<HttpVersion> onConnectionUpgrade);
 
     /**
      * Resets the state of this channel before being reused. Called by the {@link ContextReuseManager} only.
@@ -127,12 +132,16 @@ public abstract class ConnectionContext implements AutoCloseable {
      * <p>edu.umd.cs.findbugs.annotations.OverrideMustInvoke
      * @param channel The new channel to hold data for.
      */
-    public void reset(SocketChannel channel, Runnable onCloseCallback) {
+    public synchronized void reset(ByteChannel channel, Runnable onCloseCallback) {
         closed = false;
         this.channel = Objects.requireNonNull(channel);
         this.onClose = onCloseCallback;
         this.inputBuffer.reset();
         this.outputBuffer.reset();
+    }
+
+    protected boolean isClosed() {
+        return closed;
     }
 
     @Override
@@ -164,7 +173,7 @@ public abstract class ConnectionContext implements AutoCloseable {
      * @return The reference to the channel, or null if the context is closed.
      * @throws IllegalStateException if the context has already been closed
      */
-    public SocketChannel getChannel() {
+    public ByteChannel getChannel() {
         if (closed) {
             throw new IllegalStateException("The context has already been closed");
         }
@@ -172,8 +181,8 @@ public abstract class ConnectionContext implements AutoCloseable {
         return channel;
     }
 
-
-    public InputBuffer getInputBuffer() {
-        return inputBuffer;
+    protected void upgrade(ConnectionContext prev) {
+        this.channel = prev.getChannel();
+        this.inputBuffer.init(prev.inputBuffer);
     }
 }

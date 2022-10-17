@@ -20,7 +20,9 @@ public record WebServerConfig(
         int backlog,
         boolean noDelay,
         int maxIdleConnections,
-        int maxRequestSize) {
+        int maxRequestSize,
+        int maxConcurrentStreamsPerConnection,
+        int maxHeaderSize) {
     /**
      * Defines the default value for the backlog.
      * <p>
@@ -39,6 +41,8 @@ public record WebServerConfig(
     private static final int DEFAULT_BACKLOG = 0;
     private static final int DEFAULT_MAX_IDLE_CONNECTIONS = 200 ;
     public static final int DEFAULT_MAX_REQUEST_SIZE = (1 << 14) + 128; // slightly more than 16K
+    public static final int DEFAULT_MAX_CONCURRENT_STREAMS_PER_CONNECTION = 10;
+    public static final int DEFAULT_MAX_HEADER_SIZE = 1024;
 
     /*
         Additional configuration we may want
@@ -83,16 +87,20 @@ public record WebServerConfig(
                 0,
                 true,
                 DEFAULT_MAX_IDLE_CONNECTIONS,
-                DEFAULT_MAX_REQUEST_SIZE);
+                DEFAULT_MAX_REQUEST_SIZE,
+                DEFAULT_MAX_CONCURRENT_STREAMS_PER_CONNECTION,
+                DEFAULT_MAX_HEADER_SIZE);
     }
 
     public static final class Builder {
-        private String host;
+        private String host = "localhost";
         private int port;
         private InetSocketAddress addr;
         private int backlog;
         private int maxIdleConnections = DEFAULT_MAX_IDLE_CONNECTIONS;
         private int maxRequestSize = DEFAULT_MAX_REQUEST_SIZE;
+        private int maxConcurrentStreamsPerConnection = DEFAULT_MAX_CONCURRENT_STREAMS_PER_CONNECTION;
+        private int maxHeaderSize = DEFAULT_MAX_HEADER_SIZE;
         private ExecutorService executor;
         private boolean noDelay;
 
@@ -129,11 +137,27 @@ public record WebServerConfig(
             return this;
         }
 
+        public Builder maxConcurrentStreamsPerConnection(int value) {
+            if (value < 1) {
+                throw new IllegalArgumentException("You must have at least 1 max concurrent stream per connection");
+            }
+            this.maxConcurrentStreamsPerConnection = value;
+            return this;
+        }
+
         public Builder maxRequestSize(int maxRequestSize) {
             if (maxRequestSize < 128) {
                 throw new IllegalArgumentException("The maximum request size must be at least 128 bytes");
             }
             this.maxRequestSize = maxRequestSize;
+            return this;
+        }
+
+        public Builder maxHeaderSize(int maxHeaderSize) {
+            if (maxHeaderSize < 128) {
+                throw new IllegalArgumentException("The maximum header size must be at least 128 bytes");
+            }
+            this.maxHeaderSize = maxHeaderSize;
             return this;
         }
 
@@ -154,13 +178,18 @@ public record WebServerConfig(
             this.backlog = DEFAULT_BACKLOG;
             this.noDelay = true;
             this.executor = null;
+            this.maxRequestSize = DEFAULT_MAX_REQUEST_SIZE;
+            this.maxIdleConnections = DEFAULT_MAX_IDLE_CONNECTIONS;
+            this.maxConcurrentStreamsPerConnection = DEFAULT_MAX_CONCURRENT_STREAMS_PER_CONNECTION;
+            this.maxHeaderSize = DEFAULT_MAX_HEADER_SIZE;
             return this;
         }
 
         public WebServerConfig build() {
             final var a = addr == null ? new InetSocketAddress(host, port) : addr;
             final var e = executor == null ? Executors.newSingleThreadExecutor() : executor;
-            return new WebServerConfig(a, e, backlog, noDelay, maxIdleConnections, maxRequestSize);
+            return new WebServerConfig(a, e, backlog, noDelay, maxIdleConnections, maxRequestSize,
+                    maxConcurrentStreamsPerConnection, maxHeaderSize);
         }
     }
 }

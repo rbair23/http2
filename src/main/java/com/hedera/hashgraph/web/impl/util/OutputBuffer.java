@@ -5,6 +5,7 @@ import java.io.OutputStream;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
+import java.nio.channels.WritableByteChannel;
 
 /**
  * An OutputStream around a ByteBuffer that is reusable and has helpful write methods.
@@ -12,7 +13,11 @@ import java.nio.channels.SocketChannel;
 public class OutputBuffer extends OutputStream {
     private final Runnable onCloseCallback;
     private final Runnable onDataFullCallback;
-    private ByteBuffer buffer;
+
+    // The buffer.position() marks the next position to write into the buffer,
+    // while buffer.limit() marks the last possible byte to fill, so the limit
+    // is set to buffer.capacity().
+    private final ByteBuffer buffer;
 
     public OutputBuffer(int size) {
         this(size, null, null);
@@ -29,20 +34,31 @@ public class OutputBuffer extends OutputStream {
      * buffer can be reused. If onDataFullCallback is not set then a {@link BufferOverflowException} is thrown.
      */
     private void dataFull() throws BufferOverflowException {
+        // TODO Throw if closed
         if (onDataFullCallback != null) {
             onDataFullCallback.run();
-            buffer.clear();
+            this.reset();
         } else {
             throw new BufferOverflowException();
         }
     }
 
+    /**
+     */
+    private void fullIfNotRemaining(int numBytes) {
+        if (buffer.remaining() < numBytes) {
+            dataFull();
+        }
+    }
+
     public OutputBuffer reset() {
+        // TODO Throw if closed
         buffer.clear();
         return this;
     }
 
     public ByteBuffer getBuffer() {
+        // TODO Throw if closed
         return buffer;
     }
 
@@ -54,75 +70,70 @@ public class OutputBuffer extends OutputStream {
 
     /**
      * Get the number of bytes written
+     * TODO if we get to the end of the buffer and it is reset, this number is no longer
+     *      the number of bytes written, only the number of bytes available in the buffer.
      */
     public int size() {
-        return buffer.position() ;
-    }
-
-    /**
-     * Get the total capacity of this output buffer
-     */
-    public int capacity() {
-        return buffer.capacity() ;
+        // TODO Throw if closed
+        return buffer.position();
     }
 
     @Override
     public void write(int b) {
-        if (!buffer.hasRemaining()) dataFull();
+        fullIfNotRemaining(1);
         buffer.put((byte)b);
     }
 
     @Override
-    public void write(byte b[], int off, int len) {
-        if (buffer.remaining() < len) dataFull();
+    public void write(byte[] b, int off, int len) {
+        fullIfNotRemaining(len);
         buffer.put(b,off,len);
     }
 
     public void write(OutputBuffer anotherBuffer) {
-        if (buffer.remaining() < anotherBuffer.size()) dataFull();
+        fullIfNotRemaining(anotherBuffer.size());
         buffer.put(anotherBuffer.buffer.flip());
     }
 
     public void write(String string) {
-        if (buffer.remaining() < string.length()) dataFull();
+        fullIfNotRemaining(string.length());
         // write a string with no copies - TODO do we need to handle multi byte chars?
         for (int i = 0; i < string.length(); i++) {
             buffer.put((byte)string.charAt(i));
         }
     }
 
-
     // TODO flush is called from one thread, but everything else may be called from another, so this can be bad.
-    public void sendContentsToChannel(SocketChannel channel) throws IOException {
+    public void sendContentsToChannel(WritableByteChannel channel) throws IOException {
         buffer.flip();
         channel.write(buffer);
     }
 
     public void write24BitInteger(int value) {
-        if (buffer.remaining() < 3) dataFull();
+        fullIfNotRemaining(3);
         buffer.put((byte) ((value >>> 16) & 0xFF));
         buffer.put((byte) ((value >>> 8) & 0xFF));
         buffer.put((byte) (value & 0XFF));
     }
 
     public void writeByte(int value) {
-        if (!buffer.hasRemaining()) dataFull();
+       fullIfNotRemaining(1);
         buffer.put((byte) value);
     }
 
     public void write32BitInteger(int value) {
-        if (buffer.remaining() < Integer.BYTES) dataFull();
+        fullIfNotRemaining(Integer.BYTES);
         buffer.putInt(value);
     }
 
     public void write16BigInteger(int value) {
-        if (buffer.remaining() < 2) dataFull();
+        fullIfNotRemaining(2);
         buffer.put((byte) ((value >>> 8) & 0xFF));
         buffer.put((byte) (value & 0XFF));
     }
 
     public void write32BitUnsignedInteger(long value) {
-        if (buffer.remaining() < 4) dataFull();
+        fullIfNotRemaining(Integer.BYTES);
         buffer.putInt((int) ((value >>> 24) & 0xFF));
         buffer.putInt((int) ((value >>> 16) & 0xFF));
         buffer.putInt((int) ((value >>> 8) & 0xFF));
@@ -131,5 +142,9 @@ public class OutputBuffer extends OutputStream {
 
     public void write64BitLong(long pingData) {
         buffer.putLong(pingData);
+    }
+
+    public void position(int i) {
+        buffer.position(i);
     }
 }

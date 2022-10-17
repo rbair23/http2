@@ -50,7 +50,7 @@ public final class Dispatcher {
         final var handler = routes.match(method, path);
         if (handler != null) {
             threadPool.submit(() -> {
-                try {
+                try (webRequest) {
                     handler.handle(webRequest);
                 } catch (Exception ex) {
                     // Oh dang, some exception happened while handling the request. Oof. Well, somebody

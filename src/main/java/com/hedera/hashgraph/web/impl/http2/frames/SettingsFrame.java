@@ -85,6 +85,12 @@ public final class SettingsFrame extends Frame {
             throw new Http2Exception(Http2ErrorCode.FRAME_SIZE_ERROR, readAheadStreamId(in));
         }
 
+        // The settings frame we receive *MAY* be an ACK of the one we sent to the
+        // client. We DO NOT want to apply that frame here!
+        if (ack) {
+            return;
+        }
+
         // SPEC: 6.5
         //   The stream identifier MUST be 0. Otherwise, respond with connection error PROTOCOL_ERROR.
         final var streamId = in.read31BitInteger();
@@ -154,7 +160,7 @@ public final class SettingsFrame extends Frame {
      * @param out The output stream. Must not be null.
      * @throws IOException In case something cannot be written properly.
      */
-    public static void writeAck(final OutputBuffer out) throws IOException {
+    public static void writeAck(final OutputBuffer out) {
         Frame.writeHeader(out, 0, FrameType.SETTINGS, (byte) 0x1, 0);
     }
 
@@ -165,7 +171,7 @@ public final class SettingsFrame extends Frame {
      * @param settings Cannot be null
      * @throws IOException If we cannot write
      */
-    public static void write(final OutputBuffer out, final Settings settings) throws IOException {
+    public static void write(final OutputBuffer out, final Settings settings) {
         // Write out the header. The payload length is 36 because we will write all 6 fields out
         Frame.writeHeader(out, 36, FrameType.SETTINGS, (byte) 0, 0);
 

@@ -13,6 +13,10 @@ import java.io.IOException;
  * size.
  */
 public abstract class Frame {
+    /**
+     * Every frame in HTTP/2.0 is the same size -- 9 bytes.
+     */
+    public static final int FRAME_HEADER_SIZE = 9;
     protected static final byte FIRST_FLAG = (byte) 0b1000_0000;
     protected static final byte SECOND_FLAG = (byte) 0b0100_0000;
     protected static final byte THIRD_FLAG = (byte) 0b0010_0000;
@@ -209,7 +213,7 @@ public abstract class Frame {
         out.write32BitInteger(streamId);
     }
 
-    static int readAheadStreamId(final InputBuffer in) {
+    public static int readAheadStreamId(final InputBuffer in) {
         in.mark();
         in.skip(5);
         final var id = in.read31BitInteger();

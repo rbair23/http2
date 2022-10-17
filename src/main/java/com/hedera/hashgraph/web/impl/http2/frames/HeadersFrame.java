@@ -24,9 +24,9 @@ public final class HeadersFrame extends Frame {
     /**
      * Create a new Headers Frame.
      *
-     * @param length The length of this frame. Actually, this can be computed based on some other data...
-     * @param flags The flags
-     * @param streamId The stream ID
+     * @param length             The length of this frame. Actually, this can be computed based on some other data...
+     * @param flags              The flags
+     * @param streamId           The stream ID
      * @param fieldBlockFragment The block of data. This is taken as is, and not defensively copied!
      */
     public HeadersFrame(int length, byte flags, int streamId, byte[] fieldBlockFragment) {
@@ -114,6 +114,15 @@ public final class HeadersFrame extends Frame {
 
     public static void writeHeader(OutputBuffer out, int streamId, int headersSize) throws IOException {
         Frame.writeHeader(out, headersSize, FrameType.HEADERS, (byte) 0x0, streamId);
+    }
+
+    public static void writeHeader(OutputBuffer out, int streamId, int headersSize, boolean endOfStream) throws IOException {
+        Frame.writeHeader(
+                out,
+                headersSize,
+                FrameType.HEADERS,
+                endOfStream ? (byte) 0x1 : (byte) 0x0,
+                streamId);
     }
 
     public static void write(OutputBuffer out, int streamId, ByteArrayOutputStream headerContentsBuffer) throws IOException {

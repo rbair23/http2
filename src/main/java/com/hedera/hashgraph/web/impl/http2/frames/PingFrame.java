@@ -51,12 +51,9 @@ public final class PingFrame extends Frame {
      * @param in The input stream. Cannot be null.
      * @return The ping frame's data
      */
-    public static long parseData(InputBuffer in) {
-        // Read off the frame length. This *MUST* be 8 bytes, exactly.
+    public static PingFrame parse(InputBuffer in) {
+        // Read off the frame length. Validated later.
         final var frameLength = in.read24BitInteger();
-        if (frameLength != 8) {
-            throw new Http2Exception(Http2ErrorCode.FRAME_SIZE_ERROR, readAheadStreamId(in));
-        }
 
         // Read past the type
         final var type = in.readByte();
@@ -72,10 +69,17 @@ public final class PingFrame extends Frame {
             throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
         }
 
+        // SPEC: 6.7 PING
+        // Receipt of a PING frame with a length field value other than 8 MUST be treated as a connection error
+        // (Section 5.4.1) of type FRAME_SIZE_ERROR.
+        if (frameLength != 8) {
+            throw new Http2Exception(Http2ErrorCode.FRAME_SIZE_ERROR, readAheadStreamId(in));
+        }
+
         // Read off the data, which is some arbitrary 8 bytes. We can read that as a long,
         // so we do so, because it is cheap and easy to represent on the computer (but
         // it does take longer to decode, so I'm not totally sold on the approach).
-        return in.read64BitLong();
+        return new PingFrame(flags, in.read64BitLong());
     }
 
     public static void writeAck(OutputBuffer outputBuffer, long pingData) {

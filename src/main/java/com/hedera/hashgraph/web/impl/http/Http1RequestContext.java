@@ -2,17 +2,14 @@ package com.hedera.hashgraph.web.impl.http;
 
 import com.hedera.hashgraph.web.*;
 import com.hedera.hashgraph.web.impl.Dispatcher;
+import com.hedera.hashgraph.web.impl.WebHeadersImpl;
 import com.hedera.hashgraph.web.impl.session.RequestContext;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.ByteBuffer;
-import java.nio.channels.SocketChannel;
+import java.nio.channels.ByteChannel;
 import java.nio.charset.StandardCharsets;
-import java.util.Objects;
-import java.util.zip.GZIPOutputStream;
 
 import static com.hedera.hashgraph.web.impl.http.Http1Constants.*;
 
@@ -24,7 +21,13 @@ class Http1RequestContext extends RequestContext {
 
     private final Runnable responseSentCallback;
     private BodyInputStream requestBody;
-    private SocketChannel channel;
+    private ByteChannel channel;
+
+    /**
+     * The request headers. This instance is reused between requests. After we read all the header data,
+     * we parse it and set the headers in this the {@link WebHeaders} instance.
+     */
+    private final WebHeadersImpl requestHeaders = new WebHeadersImpl();
 
     /**
      * Create a new instance.
@@ -39,7 +42,13 @@ class Http1RequestContext extends RequestContext {
         this.responseSentCallback = responseSentCallback;
     }
 
-    public void setChannel(SocketChannel channel) {
+    @Override
+    protected void reset() {
+        super.reset();
+        requestHeaders.clear();
+    }
+
+    public void setChannel(ByteChannel channel) {
         this.channel = channel;
     }
 
@@ -68,14 +77,6 @@ class Http1RequestContext extends RequestContext {
         this.version = version;
     }
 
-    public void setResponseHeaders(WebHeaders responseHeaders) {
-        this.responseHeaders = responseHeaders;
-    }
-
-    public void setResponseCode(StatusCode responseCode) {
-        this.responseCode = responseCode;
-    }
-
     private void responseSent() {
         responseSentCallback.run();
     }
@@ -83,12 +84,10 @@ class Http1RequestContext extends RequestContext {
     void respond(StatusCode statusCode, WebHeaders responseHeaders, String plainTextBody)
             throws ResponseAlreadySentException {
         try {
-            responseCode = statusCode;
-            this.responseHeaders = responseHeaders;
             byte[] contentBytes = plainTextBody.getBytes(StandardCharsets.US_ASCII);
             responseHeaders.setContentLength(contentBytes.length);
             responseHeaders.setContentType("text/plain");
-            sendHeader();
+            sendHeader(statusCode, responseHeaders);
             // send body
             outputBuffer.reset();
             outputBuffer.write(contentBytes);
@@ -102,7 +101,7 @@ class Http1RequestContext extends RequestContext {
         }
     }
 
-    private void sendHeader() throws IOException {
+    private void sendHeader(StatusCode statusCode, WebHeaders responseHeaders) throws IOException {
         // Add standard response headers
         responseHeaders.setStandardResponseHeaders();
         // SEND DATA
@@ -110,9 +109,9 @@ class Http1RequestContext extends RequestContext {
         // send response line
         outputBuffer.write(version.versionString());
         outputBuffer.write(SPACE);
-        outputBuffer.write(Integer.toString(responseCode.code()));
+        outputBuffer.write(Integer.toString(statusCode.code()));
         outputBuffer.write(SPACE);
-        outputBuffer.write(responseCode.message());
+        outputBuffer.write(statusCode.message());
         outputBuffer.write(CR);
         outputBuffer.write(LF);
         // send headers
@@ -133,40 +132,53 @@ class Http1RequestContext extends RequestContext {
     // WebRequest Methods
 
     @Override
-    public OutputStream startResponse(StatusCode statusCode, WebHeaders responseHeaders) throws ResponseAlreadySentException {
-        try {
-            this.responseCode = Objects.requireNonNull(statusCode);
-            this.responseHeaders = Objects.requireNonNull(responseHeaders);
-            sendHeader();
-            // create low level sending stream
-            final HttpOutputStream httpOutputStream = new HttpOutputStream(outputBuffer, channel){
-                @Override
-                public void close() throws IOException {
-                    super.close();
-                    channel.write(ByteBuffer.wrap(new byte[]{CR,LF}));
-                    responseSent();
-                }
-            };
-            OutputStream outputStream = httpOutputStream;
-            // check for gzip
-            final String contentEncoding = this.responseHeaders.getContentEncoding();
-            if (contentEncoding != null && contentEncoding.contains(WebHeaders.CONTENT_ENCODING_GZIP)) {
-                outputStream = new GZIPOutputStream(outputStream);
-            }
-            return outputStream;
-        } catch (IOException e) {
-            e.printStackTrace(); // TODO not sure here
-            throw new RuntimeException(e);
-        }
+    public WebHeaders getRequestHeaders() {
+        return requestHeaders;
     }
 
-    @Override
-    public void respond(StatusCode statusCode, WebHeaders responseHeaders) throws ResponseAlreadySentException {
-        respond(statusCode, responseHeaders, statusCode.code()+" - "+statusCode.message());
-    }
+//    @Override
+//    public OutputStream startResponse(StatusCode statusCode, WebHeaders responseHeaders) throws ResponseAlreadySentException {
+//        try {
+//            sendHeader(statusCode, responseHeaders);
+//            // create low level sending stream
+//            final HttpOutputStream httpOutputStream = new HttpOutputStream(outputBuffer, channel){
+//                @Override
+//                public void close() throws IOException {
+//                    super.close();
+//                    channel.write(ByteBuffer.wrap(new byte[]{CR,LF}));
+//                    responseSent();
+//                }
+//            };
+//            OutputStream outputStream = httpOutputStream;
+//            // check for gzip
+//            final String contentEncoding = responseHeaders.getContentEncoding();
+//            if (contentEncoding != null && contentEncoding.contains(WebHeaders.CONTENT_ENCODING_GZIP)) {
+//                outputStream = new GZIPOutputStream(outputStream);
+//            }
+//            return outputStream;
+//        } catch (IOException e) {
+//            e.printStackTrace(); // TODO not sure here
+//            throw new RuntimeException(e);
+//        }
+//    }
+
+//    @Override
+//    public void respond(StatusCode statusCode, WebHeaders responseHeaders) throws ResponseAlreadySentException {
+//        respond(statusCode, responseHeaders, statusCode.code()+" - "+statusCode.message());
+//    }
 
     @Override
     public void respond(StatusCode statusCode) throws ResponseAlreadySentException {
-        respond(statusCode, new WebHeaders(), statusCode.code()+" - "+statusCode.message());
+        respond(statusCode, new WebHeadersImpl(), statusCode.code()+" - "+statusCode.message());
+    }
+
+    @Override
+    public WebResponse respond() throws ResponseAlreadySentException {
+        return null;
+    }
+
+    @Override
+    public void close() throws Exception {
+
     }
 }

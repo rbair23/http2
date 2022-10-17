@@ -43,24 +43,19 @@ public final class RstStreamFrame extends Frame {
      * @return A new frame instance
      */
     public static RstStreamFrame parse(InputBuffer in) {
-        // SPEC:
-        // A RST_STREAM frame with a length other than 4 octets MUST be treated as a connection error (Section 5.4.1)
-        // of type FRAME_SIZE_ERROR.
+        // Read the frame length (validate it later)
         final var frameLength = in.read24BitInteger();
-        if (frameLength != 4) {
-            throw new Http2Exception(Http2ErrorCode.FRAME_SIZE_ERROR, readAheadStreamId(in));
-        }
 
         // Read past the type
         final var type = in.readByte();
         assert type == FrameType.RST_STREAM.ordinal()
-                : "Wrong method called, type mismatch " + type + " not for reset stream";
+                : "Wrong method called, type mismatch " + type + " not for init stream";
 
-        // SPEC:
+        // SPEC: 6.4 RST_STREAM
         // The RST_STREAM frame does not define any flags.
         in.skip(1);
 
-        // SPEC:
+        // SPEC: 6.4. RST_STREAM
         // If a RST_STREAM frame is received with a stream identifier of 0x00, the recipient MUST treat this as a
         // connection error (Section 5.4.1) of type PROTOCOL_ERROR.
         final var streamId = in.read31BitInteger();
@@ -69,6 +64,13 @@ public final class RstStreamFrame extends Frame {
         }
 
         // SPEC:
+        // A RST_STREAM frame with a length other than 4 octets MUST be treated as a connection error (Section 5.4.1)
+        // of type FRAME_SIZE_ERROR.
+        if (frameLength != 4) {
+            throw new Http2Exception(Http2ErrorCode.FRAME_SIZE_ERROR, streamId);
+        }
+
+        // SPEC: 6.4 RST_STREAM
         // RST_STREAM frame contains a single unsigned, 32-bit integer identifying the error code (Section 7). The
         // error code indicates why the stream is being terminated.
         final var errorCode = Http2ErrorCode.fromOrdinal(in.read32BitInteger());
@@ -83,7 +85,7 @@ public final class RstStreamFrame extends Frame {
      * @param streamId The stream id. Must not be 0.
      * @throws IOException An exception during writing
      */
-    public static void write(OutputBuffer out, Http2ErrorCode code, int streamId) throws IOException {
+    public static void write(OutputBuffer out, Http2ErrorCode code, int streamId) {
         // Write out the header.
         Frame.writeHeader(out, 4, FrameType.RST_STREAM, (byte) 0, streamId);
         out.write32BitUnsignedInteger(code.ordinal());

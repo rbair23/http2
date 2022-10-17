@@ -5,13 +5,14 @@ import com.hedera.hashgraph.web.ResponseAlreadySentException;
 import com.hedera.hashgraph.web.StatusCode;
 import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.impl.Dispatcher;
+import com.hedera.hashgraph.web.impl.WebHeadersImpl;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
 import com.hedera.hashgraph.web.impl.session.HandleResponse;
 
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.channels.SocketChannel;
+import java.nio.channels.ByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
 
@@ -68,7 +69,7 @@ public class Http1ConnectionContext extends ConnectionContext {
     }
 
     @Override
-    public void reset(SocketChannel channel, Runnable onCloseCallback) {
+    public void reset(ByteChannel channel, Runnable onCloseCallback) {
         super.reset(channel, onCloseCallback);
         state = State.BEGIN;
         tempHeaderKey = null;
@@ -83,7 +84,7 @@ public class Http1ConnectionContext extends ConnectionContext {
     }
 
     @Override
-    public HandleResponse doHandle(Consumer<HttpVersion> onConnectionUpgrade) {
+    protected HandleResponse doHandle(Consumer<HttpVersion> onConnectionUpgrade) {
         //         generic-message = start-line
         //                          *(message-header CRLF)
         //                          CRLF
@@ -125,7 +126,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                                 state = State.VERSION;
                             } catch (URISyntaxException e) {
                                 e.printStackTrace();
-                                return respondWithError(StatusCode.BAD_REQUEST_400, new WebHeaders(),
+                                return respondWithError(StatusCode.BAD_REQUEST_400, new WebHeadersImpl(),
                                         "Bad URI: "+e.getMessage());
                             }
                         }
@@ -144,7 +145,14 @@ public class Http1ConnectionContext extends ConnectionContext {
                                 inputBuffer.skip(2);
                                 // handle versions
                                 switch (requestContext.getVersion()) {
-                                    case HTTP_1, HTTP_1_1 -> {
+                                    case HTTP_1 -> {
+                                        return respondWithError(StatusCode.UPGRADE_REQUIRED_426,
+                                                new WebHeadersImpl()
+                                                        .put("Upgrade","HTTP/1.1, HTTP/2.0")
+                                                        .put("Connection","Upgrade"),
+                                                "This service requires use of the HTTP/1.1 or HTTP/2.0 protocol.");
+                                    }
+                                    case HTTP_1_1 -> {
                                         // next state
                                         inputBuffer.mark();
                                         state = State.HEADER_KEY;

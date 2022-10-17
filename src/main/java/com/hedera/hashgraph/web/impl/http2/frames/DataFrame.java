@@ -1,5 +1,7 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
+import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
+import com.hedera.hashgraph.web.impl.http2.Http2Exception;
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
@@ -66,6 +68,13 @@ public final class DataFrame extends Frame {
         // Get the stream id
         final var streamId = in.read31BitInteger();
 
+        // SPEC: 6.1
+        // DATA frames MUST be associated with a stream. If a DATA frame is received whose Stream Identifier field is
+        // 0x00, the recipient MUST respond with a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+        if (streamId == 0) {
+            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+        }
+
         // The header section (first 9 bytes) have been read. Now we need to read the body. There are
         // exactly `frameLength` bytes in the body. Some of these may be devoted to state depending
         // on the `padded` flag. The rest will be actual data.
@@ -89,10 +98,10 @@ public final class DataFrame extends Frame {
         return new DataFrame(frameLength, flags, streamId, data);
     }
 
-    public static void writeHeader(OutputBuffer out, int streamId, int dataSize) throws IOException {
+    public static void writeHeader(OutputBuffer out, int streamId, int dataSize) {
         Frame.writeHeader(out, dataSize, FrameType.DATA, (byte) 0x0, streamId);
     }
-    public static void writeLastHeader(OutputBuffer out, int streamId) throws IOException {
+    public static void writeLastHeader(OutputBuffer out, int streamId) {
         Frame.writeHeader(out, 0, FrameType.DATA, (byte) 0x1, streamId);
     }
 
@@ -104,5 +113,4 @@ public final class DataFrame extends Frame {
             Frame.writeHeader(out, 0, FrameType.DATA, (byte) 0x1, streamId);
         }
     }
-
 }
