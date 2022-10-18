@@ -435,7 +435,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      * refer to the physical connection, only one of the logical connection streams.
      */
     private void handleRstStream() {
-        final var frame = RstStreamFrame.parse(inputBuffer);
+        final var frame = new RstStreamFrame();
+        frame.parse2(inputBuffer);
         final var streamId = checkStream(frame.getStreamId());
 
         // It is an error to receive an RST_STREAM frame for a stream that is already closed,
@@ -559,7 +560,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         //      half-closed state ready for a response! We need to cancel that job and make
         //      sure it never comes back (back to the Future!!)
         final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
-        RstStreamFrame.write(outputBuffer, exception.getCode(), streamId);
+        final var frame = new RstStreamFrame(streamId, exception.getCode());
+        frame.write(outputBuffer);
         sendOutput(outputBuffer);
     }
 
