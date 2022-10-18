@@ -180,19 +180,4 @@ public final class DataFrame extends Frame {
         super.write(out);
         out.write(data, 0, dataLength);
     }
-
-    /**
-     * Given a value, round it up to the nearest multiple of 1024.
-     *
-     * @param value The value
-     * @return The rounded up nearest multiple of 1024 to the value
-     */
-    private static int roundUpToNearestOneK(int value) {
-        if (value < 1024) {
-            return 1024;
-        } else {
-            value = Integer.highestOneBit(value);
-            return value << 1;
-        }
-    }
 }

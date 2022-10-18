@@ -250,7 +250,7 @@ public final class Http2Stream extends RequestContext {
         // TODO If I am already open, does the same headers frame cause me to go half-closed?
         // The same HEADERS frame can also cause a stream to immediately become "half-closed".
 
-        if (headerFrame.isCompleteHeader()) {
+        if (headerFrame.isEndHeaders()) {
             // I have all the bytes I will need... so I can go and decode them
             try {
                 final var codec = connection.getHeaderCodec();
@@ -362,7 +362,10 @@ public final class Http2Stream extends RequestContext {
 
         // Initialize the response buffer and fill out some placeholder content for the frame header
         responseBuffer.reset();
-        HeadersFrame.writeHeader(responseBuffer, streamId, 0, endOfStream);
+        final var frame = new HeadersFrame();
+        frame.setStreamId(streamId);
+        frame.setEndHeaders(endOfStream);
+        frame.write(responseBuffer);
 
         // Encode the headers into a packed, compressed set of bytes, and write them to the buffer.
         responseHeaders.putStatus(statusCode);

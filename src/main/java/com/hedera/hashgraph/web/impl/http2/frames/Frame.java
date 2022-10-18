@@ -119,6 +119,10 @@ public abstract class Frame {
         return streamId;
     }
 
+    public void setStreamId(int streamId) {
+        this.streamId = streamId;
+    }
+
     /**
      * Gets the frame type.
      *
@@ -138,6 +142,10 @@ public abstract class Frame {
         return (flags & FIRST_FLAG) != 0;
     }
 
+    protected final void setFirstFlag(boolean value) {
+        setFlag(FIRST_FLAG, value);
+    }
+
     /**
      * Gets whether the second flag has been set. This is a convenience for sub classes, which should
      * expose the name of the specific flag, calling this method.
@@ -146,6 +154,10 @@ public abstract class Frame {
      */
     protected final boolean isSecondFlagSet() {
         return (flags & SECOND_FLAG) != 0;
+    }
+
+    protected final void setSecondFlag(boolean value) {
+        setFlag(SECOND_FLAG, value);
     }
 
     /**
@@ -158,6 +170,10 @@ public abstract class Frame {
         return (flags & THIRD_FLAG) != 0;
     }
 
+    protected final void setThirdFlag(boolean value) {
+        setFlag(THIRD_FLAG, value);
+    }
+
     /**
      * Gets whether the fourth flag has been set. This is a convenience for sub classes, which should
      * expose the name of the specific flag, calling this method.
@@ -166,6 +182,10 @@ public abstract class Frame {
      */
     protected final boolean isFourthFlagSet() {
         return (flags & FOURTH_FLAG) != 0;
+    }
+
+    protected final void setFourthFlag(boolean value) {
+        setFlag(FOURTH_FLAG, value);
     }
 
     /**
@@ -192,6 +212,10 @@ public abstract class Frame {
         return (flags & SIXTH_FLAG) != 0;
     }
 
+    protected final void setSixthFlag(boolean value) {
+        setFlag(SIXTH_FLAG, value);
+    }
+
     /**
      * Gets whether the seventh flag has been set. This is a convenience for sub classes, which should
      * expose the name of the specific flag, calling this method.
@@ -200,6 +224,10 @@ public abstract class Frame {
      */
     protected final boolean isSeventhFlagSet() {
         return (flags & SEVENTH_FLAG) != 0;
+    }
+
+    protected final void setSeventhFlag(boolean value) {
+        setFlag(SEVENTH_FLAG, value);
     }
 
     /**
@@ -247,6 +275,21 @@ public abstract class Frame {
      */
     protected void write(OutputBuffer out) {
         writeHeader(out, payloadLength, type, flags, streamId);
+    }
+
+    /**
+     * Given a value, round it up to the nearest multiple of 1024.
+     *
+     * @param value The value
+     * @return The rounded up nearest multiple of 1024 to the value
+     */
+    protected final int roundUpToNearestOneK(int value) {
+        if (value < 1024) {
+            return 1024;
+        } else {
+            value = Integer.highestOneBit(value);
+            return value << 1;
+        }
     }
 
     /**

@@ -75,7 +75,8 @@ class ConnectionSpecTest extends SpecTest {
         SettingsFrame.parseAndMerge(inputBuffer, new Settings());
 
         // We should have received a PROTOCOL_ERROR
-        final var goAway = GoAwayFrame.parse(inputBuffer);
+        final var goAway = new GoAwayFrame();
+        goAway.parse2(inputBuffer);
         assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
     }
 
@@ -137,13 +138,13 @@ class ConnectionSpecTest extends SpecTest {
     private static Stream<Arguments> provideNonSettingsClientFrames() {
         return Stream.of(
                 Arguments.of(new DataFrame(true, 3, "Bad".getBytes(), 3)),
-                Arguments.of(new HeadersFrame(0, (byte) 1, 1, new byte[0])),
+                Arguments.of(new HeadersFrame(false, 1, new byte[0], 0)),
                 Arguments.of(new PriorityFrame(1)),
                 Arguments.of(new PingFrame(false, 1234L)),
                 Arguments.of(new GoAwayFrame(3, 1, Http2ErrorCode.CONNECT_ERROR)),
                 Arguments.of(new WindowUpdateFrame(0, 124)),
                 Arguments.of(new WindowUpdateFrame(1, 27)),
-                Arguments.of(new ContinuationFrame((byte) 0, 1, "Data".getBytes()))
+                Arguments.of(new ContinuationFrame(false, 1, "Data".getBytes(), 4))
         );
     }
 

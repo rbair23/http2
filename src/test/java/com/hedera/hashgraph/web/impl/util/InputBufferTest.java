@@ -372,6 +372,22 @@ class InputBufferTest {
     }
 
     //----------------------------------------------------------------------------------------
+    // skip()
+
+    @ParameterizedTest
+    @ValueSource(ints = { Integer.MIN_VALUE, -43, -2, -1, 0 })
+    void skipIsIdempotentWithNonPositiveValues(int numBytesToSkip) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(sequentialBytes(12));
+        buf.addData(channel);
+
+        buf.skip(3); // next byte is "3"
+        assertEquals(3, buf.peekByte());
+        buf.skip(numBytesToSkip);
+        assertEquals(3, buf.peekByte());
+    }
+
+    //----------------------------------------------------------------------------------------
     // peekByte()
 
     @Test

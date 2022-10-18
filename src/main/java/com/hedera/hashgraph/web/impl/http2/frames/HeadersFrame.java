@@ -1,5 +1,7 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
+import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
+import com.hedera.hashgraph.web.impl.http2.Http2Exception;
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
@@ -10,41 +12,28 @@ import java.util.Objects;
 /**
  * The frame for carrying request and response headers.
  */
-public final class HeadersFrame extends Frame {
+public final class HeadersFrame extends HeadersFrameBase {
     // Constants for the different flags used by this frame
     private static final int PRIORITY_FLAG = THIRD_FLAG;
     private static final int PADDED_FLAG = FIFTH_FLAG;
 
     /**
-     * The compressed header data. This may be the complete content if it fits into the maximum frame size,
-     * or it may be just a fragment if spread across a HeadersFrame and one or more ContinuationFrames.
+     * Create a new Headers Frame.
      */
-    private byte[] fieldBlockFragment;
+    public HeadersFrame() {
+        super(FrameType.HEADERS);
+    }
 
     /**
      * Create a new Headers Frame.
      *
-     * @param length             The length of this frame. Actually, this can be computed based on some other data...
-     * @param flags              The flags
-     * @param streamId           The stream ID
-     * @param fieldBlockFragment The block of data. This is taken as is, and not defensively copied!
+     * @param endStream Whether this frame represents the end-of-stream.
+     * @param streamId The stream ID. Must be positive.
+     * @param fieldBlockFragment The block of data. This is taken as is, and not defensively copied! Not null.
+     * @param blockLength The number of bytes in {@code fieldBlockFragment} that hold meaningful data.
      */
-    public HeadersFrame(int length, byte flags, int streamId, byte[] fieldBlockFragment) {
-        super(length, FrameType.HEADERS, flags, streamId);
-        this.fieldBlockFragment = Objects.requireNonNull(fieldBlockFragment);
-    }
-
-    public byte[] getFieldBlockFragment() {
-        return fieldBlockFragment;
-    }
-
-    /**
-     * Gets whether this is a complete header (i.e. there are no following continuation frames).
-     *
-     * @return {@code true} if this header is complete and there are no following continuation frames.
-     */
-    public boolean isCompleteHeader() {
-        return super.isSixthFlagSet();
+    public HeadersFrame(boolean endStream, int streamId, byte[] fieldBlockFragment, int blockLength) {
+        super(FrameType.HEADERS, endStream, streamId, fieldBlockFragment, blockLength);
     }
 
     /**
@@ -62,28 +51,25 @@ public final class HeadersFrame extends Frame {
      * to read an entire frame before calling this method.
      *
      * @param in The input stream. Cannot be null and must have the entire frame's data buffered up already.
-     * @return A non-null {@link HeadersFrame}
      */
-    public static HeadersFrame parse(InputBuffer in) {
+    @Override
+    public void parse2(InputBuffer in) {
         // First, read off the header information. These are the first 9 bytes.
+        super.parse2(in);
 
-        // Read the length off. We will use this to compute the length of fragment data
-        final var frameLength = in.read24BitInteger();
-        // Read past the type. We don't actually need this, but for safety we can assert here
-        final var type = in.readByte();
-        assert type == FrameType.HEADERS.ordinal() : "Unexpected frame type, was not HEADERS";
+        // SPEC: 6.2
+        // HEADERS frames MUST be associated with a stream. If a HEADERS frame is received whose Stream Identifier
+        // field is 0x00, the recipient MUST respond with a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+        final var streamId = getStreamId();
+        if (streamId == 0) {
+            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+        }
+
         // Get the flags, and interpret a couple of them (since we need to know them when processing
         // the payload body)
         var flags = (byte) in.readByte();
         final var priorityFlag = (flags & PRIORITY_FLAG) != 0;
         final var paddedFlag = (flags & PADDED_FLAG) != 0;
-        // Get the stream id
-        final var streamId = in.read31BitInteger();
-
-        // The header section (first 9 bytes) have been read. Now we need to read the body. There are
-        // exactly `frameLength` bytes in the body. Some of these may be devoted to state depending
-        // on the `priority` and `padded` flags. The rest will be header fragment data (compressed
-        // headers).
 
         // Get the padLength, if present.
         final var padLength = paddedFlag ? in.readByte() : 0;
@@ -99,34 +85,20 @@ public final class HeadersFrame extends Frame {
         // Compute the number of bytes that are part of the payload that are part of the block length,
         // and then read the block of fragment data.
         final var extraBytesRead = (paddedFlag ? 1 : 0) + (priorityFlag ? 5 : 0);
-        final var blockDataLength = frameLength - (padLength + extraBytesRead);
-        final byte[] fieldBlockFragment = new byte[blockDataLength];
-        in.readBytes(fieldBlockFragment, 0, blockDataLength);
+        final var blockDataLength = getPayloadLength() - (padLength + extraBytesRead);
+        readFieldBlockData(blockDataLength, in);
 
         // Skip any padding that may have been there.
         in.skip(padLength);
-
-        // TODO When I read the fieldBlockFragment, I don't actually want to read it into a temporary byte array,
-        //      I want to actually read it into the destination array. So this is wrong.
-
-        return new HeadersFrame(frameLength, flags, streamId, fieldBlockFragment);
     }
 
-    public static void writeHeader(OutputBuffer out, int streamId, int headersSize) throws IOException {
-        Frame.writeHeader(out, headersSize, FrameType.HEADERS, (byte) 0x0, streamId);
-    }
-
-    public static void writeHeader(OutputBuffer out, int streamId, int headersSize, boolean endOfStream) throws IOException {
-        Frame.writeHeader(
-                out,
-                headersSize,
-                FrameType.HEADERS,
-                endOfStream ? (byte) 0x1 : (byte) 0x0,
-                streamId);
-    }
-
-    public static void write(OutputBuffer out, int streamId, ByteArrayOutputStream headerContentsBuffer) throws IOException {
-        Frame.writeHeader(out, headerContentsBuffer.size(), FrameType.HEADERS, (byte) 0x0, streamId);
-        headerContentsBuffer.writeTo(out);
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void write(OutputBuffer out) {
+        assert getStreamId() != 0 : "Failed to update the stream ID prior to writing";
+        super.write(out);
+        out.write(getFieldBlockFragment(), 0, getBlockLength());
     }
 }

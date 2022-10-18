@@ -211,7 +211,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             // includes an error code (Section 7) that indicates why the connection is terminating. After sending the
             // GOAWAY frame for an error condition, the endpoint MUST close the TCP connection.
             final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
-            GoAwayFrame.write(outputBuffer, e.getCode(), e.getStreamId(), lastSuccessfulStreamId);
+            final var frame = new GoAwayFrame(e.getStreamId(), lastSuccessfulStreamId, e.getCode());
+            frame.write(outputBuffer);
             sendOutput(outputBuffer);
             close();
             return HandleResponse.CLOSE_CONNECTION;
@@ -359,7 +360,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      */
     private void handleHeaders() {
         try {
-            final var frame = HeadersFrame.parse(inputBuffer);
+            final var frame = new HeadersFrame();
+            frame.parse2(inputBuffer);
             final var streamId = checkStream(frame.getStreamId());
 
             // Please, don't try to send the same headers frame twice...

@@ -219,10 +219,14 @@ public final class InputBuffer {
      * Skips over {@code length} bytes in the stream. If {@code length} is greater than the
      * available bytes in the stream, an exception is thrown.
      *
-     * @param length The length
+     * @param length The length. If negative or 0, nothing is skipped.
      * @throws IllegalArgumentException If an attempt is made to skip more bytes than are available.
      */
     public void skip(final int length) {
+        if (length < 1) {
+            return;
+        }
+
         assertAvailable(length);
         bb.position(bb.position() + length);
     }
