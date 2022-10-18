@@ -1,5 +1,7 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
+import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
+import com.hedera.hashgraph.web.impl.http2.Http2Exception;
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
@@ -30,7 +32,7 @@ public abstract class Frame {
      * This length makes up the first 3 bytes (24-bit unsigned int) of the frame and indicates the
      * length of the <b>payload</b> of the frame (everything not in the 9-byte header).
      */
-    private final int payloadLength;
+    private int payloadLength;
 
     /**
      * The type of this frame. On wire this is a single byte.
@@ -41,14 +43,14 @@ public abstract class Frame {
      * A set of 8 flags, many of which are unused by specific frame types. The meaning of these flags
      * is frame-type specific.
      */
-    private final byte flags;
+    private byte flags;
 
     /**
      * The stream ID is a 31-bit unsigned integer, proceeded by a single reserved bit. This is
      * convenient as it means we can represent the stream ID as an integer and know it will
      * never be negative (since we can mask off the high-order bit).
      */
-    private final int streamId;
+    private int streamId;
 
     /**
      * Create a new instance. Only subclasses can call this constructor.
@@ -71,6 +73,18 @@ public abstract class Frame {
     }
 
     /**
+     * Create a new instance. Only subclasses can call this constructor.
+     *
+     * @param type The type of frame. This is specified by the subclass and must not be null and match the
+     *             actual subclass type.
+     */
+    protected Frame(FrameType type) {
+        assert type != null : "You must specify the type (and please, make it accurate)";
+
+        this.type = type;
+    }
+
+    /**
      * Gets the total length of the entire frame, including the header section and the payload section,
      * in bytes.
      *
@@ -87,6 +101,13 @@ public abstract class Frame {
      */
     public final int getPayloadLength() {
         return payloadLength;
+    }
+
+    protected final void setPayloadLength(int length) {
+        if (length < 0) {
+            throw new IllegalArgumentException("Length cannot be negative");
+        }
+        this.payloadLength = length;
     }
 
     /**
@@ -187,13 +208,36 @@ public abstract class Frame {
         return (flags & EIGHTH_FLAG) != 0;
     }
 
+    protected final void setEighthFlag(boolean value) {
+        if (value) {
+            flags |= 1;
+        } else {
+            flags &= 0;
+        }
+    }
+
+    protected void parse2(InputBuffer in) {
+        // Read off the frame length. Validated later.
+        this.payloadLength = in.read24BitInteger();
+
+        // Read past the type
+        final var typeOrdinal = in.readByte();
+        assert typeOrdinal == type.ordinal()
+                : "Wrong method called, type mismatch " + type + " not for " + type;
+
+        // The flags
+        this.flags = in.readByte();
+
+        // The stream ID
+        this.streamId = in.read31BitInteger();
+    }
+
     /**
      * Writes the frame header to the output stream.
      *
      * @param out The output stream, which must not be null
-     * @throws IOException If there is a problem writing to the stream
      */
-    protected void writeHeader(OutputBuffer out) throws IOException {
+    protected void write(OutputBuffer out) {
         writeHeader(out, payloadLength, type, flags, streamId);
     }
 

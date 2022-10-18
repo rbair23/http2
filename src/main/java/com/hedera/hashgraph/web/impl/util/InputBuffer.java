@@ -81,7 +81,7 @@ public final class InputBuffer {
     // TODO This was added for testing, I would prefer NOT to expose the buffer at all and find
     //      another way to make testing happy.
     public ByteBuffer getBuffer() {
-        return bb.asReadOnlyBuffer();
+        return bb;//.asReadOnlyBuffer();
     }
 
     /**

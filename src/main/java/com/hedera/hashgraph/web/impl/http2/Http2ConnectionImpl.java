@@ -481,7 +481,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      * Handles a "ping" frame. This is a connection level frame.
      */
     private void handlePing() {
-        final var frame = PingFrame.parse(inputBuffer);
+        final var frame = new PingFrame();
+        frame.parse2(inputBuffer);
         // SPEC: 6.7 PING
         // Receivers of a PING frame that does not include an ACK flag MUST send a PING frame with the ACK flag set in
         // response, with an identical frame payload.

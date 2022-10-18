@@ -139,7 +139,7 @@ class ConnectionSpecTest extends SpecTest {
                 Arguments.of(new DataFrame(3, (byte) 0, 1, "Bad".getBytes())),
                 Arguments.of(new HeadersFrame(0, (byte) 1, 1, new byte[0])),
                 Arguments.of(new PriorityFrame(1)),
-                Arguments.of(new PingFrame((byte) 0, 1234L)),
+                Arguments.of(new PingFrame(false, 1234L)),
                 Arguments.of(new GoAwayFrame(3, 1, Http2ErrorCode.CONNECT_ERROR)),
                 Arguments.of(new WindowUpdateFrame(0, 124)),
                 Arguments.of(new WindowUpdateFrame(1, 27)),
