@@ -227,7 +227,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // The server connection preface consists of a potentially empty SETTINGS frame (Section 6.5)
         // that MUST be the first frame the server sends in the HTTP/2 connection.
         final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
-        SettingsFrame.write(outputBuffer, serverSettings);
+        final var frame = new SettingsFrame(serverSettings);
+        frame.write(outputBuffer);
         sendOutput(outputBuffer);
         state = State.AWAITING_SETTINGS;
     }
@@ -458,8 +459,9 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         final long formerHeaderTableSize = clientSettings.getHeaderTableSize();
 
         // Merge the settings from the frame into the clientSettings we already have
-        final var isAck = SettingsFrame.parseAndMerge(inputBuffer, clientSettings);
-        if (!isAck) {
+        final var frame = new SettingsFrame();
+        frame.parse2(inputBuffer);
+        if (!frame.isAck()) {
             // If the settings have changed, then recreate the codec
             if (formerMaxHeaderListSize != clientSettings.getMaxHeaderListSize() ||
                     formerHeaderTableSize != clientSettings.getHeaderTableSize()) {
@@ -468,8 +470,10 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
 
             // Write the ACK frame to the client
             final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
-            SettingsFrame.writeAck(outputBuffer);
+            frame.writeAck(outputBuffer);
             sendOutput(outputBuffer);
+        } else {
+            frame.mergeInto(clientSettings);
         }
     }
 
