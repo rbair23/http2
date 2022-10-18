@@ -1,10 +1,12 @@
 package com.hedera.hashgraph.web.impl.session;
 
 import com.hedera.hashgraph.web.WebServerConfig;
+import com.hedera.hashgraph.web.impl.DataHandler;
 import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.Http2ConnectionImpl;
 import com.hedera.hashgraph.web.impl.http2.Http2Stream;
+import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -50,6 +52,14 @@ public final class ContextReuseManager {
     private final IdleList<Http2Stream> idleHttp2RequestContexts = new IdleList<>();
 
     /**
+     * Each {@link ConnectionContext} has a queue of {@link OutputBuffer} waiting to be written. The number of such
+     * objects is dynamic, but wedon't want to generate and allocate a lot of garbage, So we have a linked-list of
+     * unused {@link OutputBuffer}from which we can take one (from the main thread) and return one (from any of the
+     * thread in the
+     */
+    private final IdleList<OutputBuffer> outputBuffers = new IdleList<>();
+
+    /**
      * Create a new instance
      *
      * @param dispatcher cannot be null
@@ -61,7 +71,7 @@ public final class ContextReuseManager {
 
     /**
      * Gets an {@link Http1ConnectionContext} instance that can be used for a new channel.
-     * The {@link com.hedera.hashgraph.web.impl.IncomingDataHandler} is responsible to make
+     * The {@link DataHandler} is responsible to make
      * sure we don't create too many contexts.
      *
      * @return An {@link Http1ConnectionContext} instance ready to be configured. Never null.
@@ -83,7 +93,7 @@ public final class ContextReuseManager {
 
     /**
      * Gets an {@link Http2ConnectionImpl} instance that can be used for a new channel.
-     * The {@link com.hedera.hashgraph.web.impl.IncomingDataHandler} is responsible to make
+     * The {@link DataHandler} is responsible to make
      * sure we don't create too many contexts.
      *
      * @return An {@link Http2ConnectionImpl} instance ready to be configured. Never null.
@@ -120,6 +130,27 @@ public final class ContextReuseManager {
      */
     public void returnHttp2RequestContext(final Http2Stream http2Stream) {
         idleHttp2RequestContexts.checkin(Objects.requireNonNull(http2Stream));
+    }
+
+    /**
+     * Gets an {@link OutputBuffer} instance that can be used by channel context for writing data.
+     * The {@link ConnectionContext} is responsible to make sure we don't create too many contexts.
+     *
+     * @return An {@link OutputBuffer} instance reset and ready to used. Never null.
+     */
+    public OutputBuffer checkoutOutputBuffer() {
+        return outputBuffers.checkout(
+                () -> new OutputBuffer(config.outputBufferSize())).reset();
+    }
+
+    /**
+     * Returns a previously checked out {@link OutputBuffer}. Once returned, do not use it again until it is
+     * re-checked out!
+     *
+     * @param outputBuffer The buffer to return. Cannot be null.
+     */
+    public void returnOutputBuffer(OutputBuffer outputBuffer) {
+        outputBuffers.checkin(Objects.requireNonNull(outputBuffer));
     }
 
     /**

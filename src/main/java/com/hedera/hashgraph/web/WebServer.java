@@ -2,7 +2,7 @@ package com.hedera.hashgraph.web;
 
 import com.hedera.hashgraph.web.impl.ChannelManager;
 import com.hedera.hashgraph.web.impl.Dispatcher;
-import com.hedera.hashgraph.web.impl.IncomingDataHandler;
+import com.hedera.hashgraph.web.impl.DataHandler;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -81,7 +81,7 @@ public final class WebServer {
      * Handles incoming data from the {@link #ssc} by distributing it to various implementation
      * classes that will process that data and eventually create a request to be handled by a route.
      */
-    private IncomingDataHandler incomingDataHandler;
+    private DataHandler dataHandler;
 
     /**
      * This thread is used for running the dispatcher. It is created on {@link #start()}
@@ -145,8 +145,8 @@ public final class WebServer {
         // Create and start the dang thread
         final var dispatcher = new Dispatcher(routes, config.executor());
         final var channelManager = new ChannelManager(ssc, config.noDelay());
-        this.incomingDataHandler = new IncomingDataHandler(config, dispatcher, channelManager);
-        this.incomingDataHandlerThread = new Thread(incomingDataHandler, "WebServer-" + versionNumber);
+        this.dataHandler = new DataHandler(config, dispatcher, channelManager);
+        this.incomingDataHandlerThread = new Thread(dataHandler, "WebServer-" + versionNumber);
         lifecycle = Lifecycle.STARTED;
         this.incomingDataHandlerThread.start();
     }
@@ -170,7 +170,7 @@ public final class WebServer {
 
 //        this.selector.wakeup();
         config.executor().shutdown();
-        incomingDataHandler.close();
+        dataHandler.close();
 //        // TODO Replace the use of System.currentTimeMillis with something like from platform that
 //        //      lets me fake out the time for testing purposes.
 //        long latest = System.currentTimeMillis() + delay * 1000L;

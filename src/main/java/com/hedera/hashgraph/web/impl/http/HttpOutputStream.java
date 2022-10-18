@@ -17,12 +17,12 @@ class HttpOutputStream extends OutputStream {
         this.channel = channel;
         outputBuffer.reset();
     }
-
-    @Override
-    public void flush() throws IOException {
-        outputBuffer.sendContentsToChannel(channel);
-        outputBuffer.reset();
-    }
+//
+//    @Override
+//    public void flush() throws IOException {
+//        outputBuffer.sendContentsToChannel(channel);
+//        outputBuffer.reset();
+//    }
 
     @Override
     public void write(int b) throws IOException {
@@ -36,6 +36,6 @@ class HttpOutputStream extends OutputStream {
 
     @Override
     public void close() throws IOException {
-        outputBuffer.sendContentsToChannel(channel);
+//        outputBuffer.sendContentsToChannel(channel);
     }
 }

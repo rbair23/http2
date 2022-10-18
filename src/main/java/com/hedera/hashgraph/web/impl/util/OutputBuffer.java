@@ -103,12 +103,6 @@ public class OutputBuffer extends OutputStream {
         }
     }
 
-    // TODO flush is called from one thread, but everything else may be called from another, so this can be bad.
-    public void sendContentsToChannel(WritableByteChannel channel) throws IOException {
-        buffer.flip();
-        channel.write(buffer);
-    }
-
     public void write24BitInteger(int value) {
         fullIfNotRemaining(3);
         buffer.put((byte) ((value >>> 16) & 0xFF));

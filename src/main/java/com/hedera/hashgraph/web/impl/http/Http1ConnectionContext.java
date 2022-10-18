@@ -64,7 +64,8 @@ public class Http1ConnectionContext extends ConnectionContext {
      */
     public Http1ConnectionContext(final ContextReuseManager contextReuseManager, final Dispatcher dispatcher) {
         super(contextReuseManager, 16*1024);
-        this.requestContext = new Http1RequestContext(dispatcher, outputBuffer, () -> {
+        this.requestContext = new Http1RequestContext(dispatcher, contextReuseManager::checkoutOutputBuffer, outputBuffer -> {
+            sendOutput(outputBuffer);
             if (isKeepAlive) {
                 state = State.BEGIN;
                 tempHeaderKey = null;
@@ -185,7 +186,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                             }
                             // full preface read, now hand over to http 2 handler
                             onConnectionUpgrade.accept(HttpVersion.HTTP_2);
-                            return HandleResponse.ALL_DATA_READ;
+                            return HandleResponse.ALL_DATA_HANDLED;
                         }
                         break;
                     case HEADER_KEY:
@@ -210,14 +211,14 @@ public class Http1ConnectionContext extends ConnectionContext {
                                             requestContext.setRequestBody(new BodyInputStream(inputBuffer, bodySize));
                                         } else {
                                             state = State.WAITING_FOR_END_OF_REQUEST_BODY;
-                                            return HandleResponse.ALL_DATA_READ;
+                                            return HandleResponse.ALL_DATA_HANDLED;
                                         }
                                     }
                                     // dispatch
                                     requestContext.dispatch();
                                     // we have done our job reading data, now up to dispatcher to send response and the
                                     // call callback.
-                                    return HandleResponse.ALL_DATA_READ;
+                                    return HandleResponse.ALL_DATA_HANDLED;
                                 } else {
                                     respondWithError(StatusCode.BAD_REQUEST_400);
                                 }
@@ -256,7 +257,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                             requestContext.dispatch();
                             // we have done our job reading data, now up to dispatcher to send response and the
                             // call callback.
-                            return HandleResponse.ALL_DATA_READ;
+                            return HandleResponse.ALL_DATA_HANDLED;
                         }
                         break;
                 }
@@ -264,17 +265,17 @@ public class Http1ConnectionContext extends ConnectionContext {
         } catch (ResponseAlreadySentException e) {
             e.printStackTrace();
         }
-        return HandleResponse.ALL_DATA_READ;
+        return HandleResponse.ALL_DATA_HANDLED;
     }
 
     private HandleResponse respondWithError(StatusCode statusCode) {
-        requestContext.respond(statusCode);
-        return isKeepAlive ? HandleResponse.ALL_DATA_READ : HandleResponse.CLOSE_CONNECTION;
+        requestContext.setResponseStatusCode(statusCode);
+        return isKeepAlive ? HandleResponse.ALL_DATA_HANDLED : HandleResponse.CLOSE_CONNECTION;
     }
 
     private HandleResponse respondWithError(StatusCode statusCode, WebHeaders webHeaders, String bodyMessage) {
         requestContext.respond(statusCode,webHeaders,bodyMessage);
-        return isKeepAlive ? HandleResponse.ALL_DATA_READ : HandleResponse.CLOSE_CONNECTION;
+        return isKeepAlive ? HandleResponse.ALL_DATA_HANDLED : HandleResponse.CLOSE_CONNECTION;
     }
 
 
@@ -302,7 +303,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                     // all good we now have a complete start line
                     return true;
                 } else {
-                    requestContext.respond(StatusCode.BAD_REQUEST_400);
+                    requestContext.setResponseStatusCode(StatusCode.BAD_REQUEST_400);
                     return false;
                 }
             }

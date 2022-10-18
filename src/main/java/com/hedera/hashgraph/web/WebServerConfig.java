@@ -22,7 +22,8 @@ public record WebServerConfig(
         int maxIdleConnections,
         int maxRequestSize,
         int maxConcurrentStreamsPerConnection,
-        int maxHeaderSize) {
+        int maxHeaderSize,
+        int outputBufferSize) {
     /**
      * Defines the default value for the backlog.
      * <p>
@@ -43,6 +44,7 @@ public record WebServerConfig(
     public static final int DEFAULT_MAX_REQUEST_SIZE = (1 << 14) + 128; // slightly more than 16K
     public static final int DEFAULT_MAX_CONCURRENT_STREAMS_PER_CONNECTION = 10;
     public static final int DEFAULT_MAX_HEADER_SIZE = 1024;
+    public static final int DEFAULT_OUTPUT_BUFFER_SIZE = 16*1024;
 
     /*
         Additional configuration we may want
@@ -89,7 +91,8 @@ public record WebServerConfig(
                 DEFAULT_MAX_IDLE_CONNECTIONS,
                 DEFAULT_MAX_REQUEST_SIZE,
                 DEFAULT_MAX_CONCURRENT_STREAMS_PER_CONNECTION,
-                DEFAULT_MAX_HEADER_SIZE);
+                DEFAULT_MAX_HEADER_SIZE,
+                DEFAULT_OUTPUT_BUFFER_SIZE);
     }
 
     public static final class Builder {
@@ -101,6 +104,7 @@ public record WebServerConfig(
         private int maxRequestSize = DEFAULT_MAX_REQUEST_SIZE;
         private int maxConcurrentStreamsPerConnection = DEFAULT_MAX_CONCURRENT_STREAMS_PER_CONNECTION;
         private int maxHeaderSize = DEFAULT_MAX_HEADER_SIZE;
+        private int outputBufferSize = DEFAULT_OUTPUT_BUFFER_SIZE;
         private ExecutorService executor;
         private boolean noDelay;
 
@@ -160,6 +164,13 @@ public record WebServerConfig(
             this.maxHeaderSize = maxHeaderSize;
             return this;
         }
+        public Builder outputBufferSize(int outputBufferSize) {
+            if (outputBufferSize < 1024) {
+                throw new IllegalArgumentException("The maximum header size must be at least 128 bytes");
+            }
+            this.outputBufferSize = outputBufferSize;
+            return this;
+        }
 
         public Builder noDelay(boolean value) {
             this.noDelay = value;
@@ -182,6 +193,7 @@ public record WebServerConfig(
             this.maxIdleConnections = DEFAULT_MAX_IDLE_CONNECTIONS;
             this.maxConcurrentStreamsPerConnection = DEFAULT_MAX_CONCURRENT_STREAMS_PER_CONNECTION;
             this.maxHeaderSize = DEFAULT_MAX_HEADER_SIZE;
+            this.outputBufferSize = DEFAULT_OUTPUT_BUFFER_SIZE;
             return this;
         }
 
@@ -189,7 +201,7 @@ public record WebServerConfig(
             final var a = addr == null ? new InetSocketAddress(host, port) : addr;
             final var e = executor == null ? Executors.newSingleThreadExecutor() : executor;
             return new WebServerConfig(a, e, backlog, noDelay, maxIdleConnections, maxRequestSize,
-                    maxConcurrentStreamsPerConnection, maxHeaderSize);
+                    maxConcurrentStreamsPerConnection, maxHeaderSize, outputBufferSize);
         }
     }
 }

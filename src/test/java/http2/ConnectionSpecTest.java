@@ -37,7 +37,7 @@ class ConnectionSpecTest extends SpecTest {
     @DisplayName("Client Settings Follows Preface")
     void settingsFollowsPreface() {
         SettingsFrame.write(channel.getDataToSend(), new Settings());
-        http2Connection.handle(version -> {});
+        http2Connection.handleIncomingData(version -> {});
 
         final var serverSettings = new Settings();
         SettingsFrame.parseAndMerge(channel.getDataReceived(), serverSettings);

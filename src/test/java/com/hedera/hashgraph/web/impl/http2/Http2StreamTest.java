@@ -87,7 +87,7 @@ class Http2StreamTest {
             assertEquals(0, request.getRequestBody().available());
             assertEquals(-1, request.getRequestBody().read());
 
-            request.respond(StatusCode.OK_200);
+            request.setResponseStatusCode(StatusCode.OK_200);
         });
 
         final var ctx = ctxManager.checkoutHttp2RequestContext();
@@ -138,9 +138,7 @@ class Http2StreamTest {
                 new Decoder(1000, 1000));
 
         @Override
-        public void flush(OutputBuffer buffer) {
-            onWireOutput.put(buffer.getBuffer());
-        }
+        public void sendOutput(OutputBuffer buffer) { onWireOutput.put(buffer.getBuffer()); }
 
         @Override
         public void close(int streamId) {

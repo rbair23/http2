@@ -59,22 +59,22 @@ public interface WebRequest extends AutoCloseable {
      */
     InputStream getRequestBody() throws IOException;
 
-    /**
+    /** TODO comment needs updating
      * Creates a {@link WebResponse} that can be used to send a response to the client.
      *
      * @throws ResponseAlreadySentException if any of the "response" methods has already been called.
      */
-    WebResponse respond() throws ResponseAlreadySentException;
+    WebResponse getResponse() throws ResponseAlreadySentException;
 
-    /**
+    /** TODO comment needs updating
      * Responds to the request with the given status code. There is no response body
      * for this response. This call concludes the request and returns the status code to the client.
      *
      * @param statusCode The response code.
      * @throws ResponseAlreadySentException if any of the "response" methods has already been called.
      */
-    default void respond(final StatusCode statusCode) throws ResponseAlreadySentException {
+    default void setResponseStatusCode(final StatusCode statusCode) throws ResponseAlreadySentException {
         Objects.requireNonNull(statusCode);
-        respond().statusCode(statusCode);
+        getResponse().statusCode(statusCode);
     }
 }

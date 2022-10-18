@@ -1,7 +1,7 @@
 package com.hedera.hashgraph.web.impl.session;
 
 import com.hedera.hashgraph.web.HttpVersion;
-import com.hedera.hashgraph.web.impl.*;
+import com.hedera.hashgraph.web.impl.DataHandler;
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ByteChannel;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 
 /**
@@ -20,7 +21,7 @@ import java.util.function.Consumer;
  *
  * <p>Closing the context will close the underlying connection.
  *
- * <p>Each context maintains an "input buffer". As the {@link IncomingDataHandler} is alerted to bytes on the underlying
+ * <p>Each context maintains an "input buffer". As the {@link DataHandler} is alerted to bytes on the underlying
  * channel for a connection, it delegates to the {@link ConnectionContext} to pull those bytes and add them to the
  * input buffer. The context has its own state machine (which differs between HTTP/1.1 and HTTP/2) and, based
  * on the bytes in the input buffer, will advance the state machine. For successful connections, this eventually
@@ -45,12 +46,12 @@ public abstract class ConnectionContext implements AutoCloseable {
     protected final InputBuffer inputBuffer;
 
     /**
-     * The buffered output for this connection. This is a single instance for the lifecycle of the context.
+     * The queue of buffered output for this connection. TODO from here:: This is a single instance for the lifecycle of the context.
      * When this {@link ConnectionContext} is closed, the output buffer is init in anticipation of the next channel
      * to be serviced. The contents of this buffer are for the communication that belongs to the connection.
      * In HTTP/2.0, these would be connection frames. Stream frames would be in their own buffers.
      */
-    protected final OutputBuffer outputBuffer;
+    private final ConcurrentLinkedQueue<OutputBuffer> waitingForWriteOutputBufferQueue = new ConcurrentLinkedQueue<>();
 
     /**
      * The underlying {@link ByteChannel} that we use for reading and writing data.
@@ -79,7 +80,6 @@ public abstract class ConnectionContext implements AutoCloseable {
     protected ConnectionContext(final ContextReuseManager contextReuseManager, final int bufferSize) {
         this.contextReuseManager = Objects.requireNonNull(contextReuseManager);
         this.inputBuffer = new InputBuffer(bufferSize);
-        this.outputBuffer = new OutputBuffer(bufferSize);
     }
 
     /**
@@ -89,7 +89,7 @@ public abstract class ConnectionContext implements AutoCloseable {
      *                            the HTTP/1.1 context may invoke this to upgrade to HTTP/2.0.
      * @return If handle has read all data, left data still to read or wants the connection to be closed.
      */
-    public final HandleResponse handle(final Consumer<HttpVersion> onConnectionUpgrade) {
+    public final HandleResponse handleIncomingData(final Consumer<HttpVersion> onConnectionUpgrade) {
         try {
             // Put the data into the input stream
             final var dataRemains = inputBuffer.addData(channel);
@@ -97,10 +97,10 @@ public abstract class ConnectionContext implements AutoCloseable {
             if (doHandleResponse == HandleResponse.CLOSE_CONNECTION) {
                 close();
                 return HandleResponse.CLOSE_CONNECTION;
-            } else if (dataRemains || doHandleResponse == HandleResponse.DATA_STILL_TO_READ) {
-                return HandleResponse.DATA_STILL_TO_READ;
+            } else if (dataRemains || doHandleResponse == HandleResponse.DATA_STILL_TO_HANDLED) {
+                return HandleResponse.DATA_STILL_TO_HANDLED;
             } else {
-                return HandleResponse.ALL_DATA_READ;
+                return HandleResponse.ALL_DATA_HANDLED;
             }
         } catch (IOException e) {
             // The underlying channel is closed, we need to clean things up
@@ -113,6 +113,47 @@ public abstract class ConnectionContext implements AutoCloseable {
             close();
             return HandleResponse.CLOSE_CONNECTION;
         }
+    }
+
+    /**
+     * Write as much pending data to the channel as the channel will accept. Returning ALL_DATA_HANDLED if all pending
+     * data was written to channel or DATA_STILL_TO_HANDLED if channel would not accept all data without blocking.
+     *
+     * @return if app pending data was written or not or we are done with channel, and it can be closed.
+     */
+    public final HandleResponse handleOutgoingData() {
+        try {
+            while (!waitingForWriteOutputBufferQueue.isEmpty()) {
+                final OutputBuffer outputBuffer = waitingForWriteOutputBufferQueue.peek();
+                final ByteBuffer buffer = outputBuffer.getBuffer();
+                // flip the buffer so it is ready to be written out
+                buffer.flip();
+
+                channel.write(buffer);
+                if (buffer.hasRemaining()) {
+                    // not all data was written
+                    return HandleResponse.DATA_STILL_TO_HANDLED;
+                }
+                // all data was written, so we can remove that buffer and return to pool
+                contextReuseManager.returnOutputBuffer(waitingForWriteOutputBufferQueue.remove());
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            return HandleResponse.CLOSE_CONNECTION;
+        }
+        return HandleResponse.ALL_DATA_HANDLED;
+    }
+
+    /**
+     * Queue the provided buffer to be sent. The buffer will be fliped and all bytes between the start of buffer and
+     * current position will be written to the channel next time the channel is ready to accept bytes.
+     * <br>
+     * This method can be called form any thead
+     *
+     * @param buffer The un-flipped buffer to write
+     */
+    public void sendOutput(OutputBuffer buffer) {
+        waitingForWriteOutputBufferQueue.add(buffer);
     }
 
     /**
@@ -137,7 +178,7 @@ public abstract class ConnectionContext implements AutoCloseable {
         this.channel = Objects.requireNonNull(channel);
         this.onClose = onCloseCallback;
         this.inputBuffer.reset();
-        this.outputBuffer.reset();
+        this.waitingForWriteOutputBufferQueue.clear();
     }
 
     protected boolean isClosed() {
@@ -160,7 +201,7 @@ public abstract class ConnectionContext implements AutoCloseable {
 
             this.channel = null;
             this.inputBuffer.reset();
-            this.outputBuffer.reset();
+            this.waitingForWriteOutputBufferQueue.clear();
 
             if (this.onClose != null) {
                 this.onClose.run();
@@ -173,7 +214,7 @@ public abstract class ConnectionContext implements AutoCloseable {
      * @return The reference to the channel, or null if the context is closed.
      * @throws IllegalStateException if the context has already been closed
      */
-    public ByteChannel getChannel() {
+    protected ByteChannel getChannel() {
         if (closed) {
             throw new IllegalStateException("The context has already been closed");
         }

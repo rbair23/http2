@@ -2,18 +2,16 @@ package com.hedera.hashgraph.web.impl.http2;
 
 import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.WebServerConfig;
-import com.hedera.hashgraph.web.impl.IncomingDataHandler;
+import com.hedera.hashgraph.web.impl.DataHandler;
 import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.frames.*;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
-import com.hedera.hashgraph.web.impl.session.FailedFlushException;
 import com.hedera.hashgraph.web.impl.session.HandleResponse;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import com.twitter.hpack.Decoder;
 import com.twitter.hpack.Encoder;
 
-import java.io.IOException;
 import java.nio.channels.ByteChannel;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -139,7 +137,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
     // Connection Context Methods
 
     /**
-     * Called by {@link IncomingDataHandler} when it realizes that a connection needs to be upgraded from
+     * Called by {@link DataHandler} when it realizes that a connection needs to be upgraded from
      * HTTP/1.1 to HTTP/2. When that happens, this method is called with the previous context, from which
      * we can fetch any data already present in the previous context.
      *
@@ -195,8 +193,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // NOTE: Called on the connection thread
         try {
             // As long as we don't need more data, we will keep processing frames.
-            var response = HandleResponse.DATA_STILL_TO_READ;
-            while (response == HandleResponse.DATA_STILL_TO_READ) {
+            var response = HandleResponse.DATA_STILL_TO_HANDLED;
+            while (response == HandleResponse.DATA_STILL_TO_HANDLED) {
                 switch (state) {
                     case START ->  handleStart();
                     case AWAITING_SETTINGS -> response = handleInitialSettings();
@@ -212,8 +210,9 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             // stream identifier of the last stream that it successfully received from its peer. The GOAWAY frame
             // includes an error code (Section 7) that indicates why the connection is terminating. After sending the
             // GOAWAY frame for an error condition, the endpoint MUST close the TCP connection.
+            final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
             GoAwayFrame.write(outputBuffer, e.getCode(), e.getStreamId(), lastSuccessfulStreamId);
-            flush(outputBuffer);
+            sendOutput(outputBuffer);
             close();
             return HandleResponse.CLOSE_CONNECTION;
         }
@@ -226,9 +225,9 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // SPEC: 3.4 HTTP/2 Connection Preface
         // The server connection preface consists of a potentially empty SETTINGS frame (Section 6.5)
         // that MUST be the first frame the server sends in the HTTP/2 connection.
-        outputBuffer.reset();
+        final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
         SettingsFrame.write(outputBuffer, serverSettings);
-        flush(outputBuffer);
+        sendOutput(outputBuffer);
         state = State.AWAITING_SETTINGS;
     }
 
@@ -252,9 +251,9 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             }
 
             state = State.OPEN;
-            return HandleResponse.DATA_STILL_TO_READ;
+            return HandleResponse.DATA_STILL_TO_HANDLED;
         } else {
-            return HandleResponse.ALL_DATA_READ;
+            return HandleResponse.ALL_DATA_HANDLED;
         }
     }
 
@@ -318,14 +317,14 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
                 }
 
                 // We successfully handled the frame. So we don't need any more data.
-                return HandleResponse.ALL_DATA_READ;
+                return HandleResponse.ALL_DATA_HANDLED;
             } else {
                 // We need more data to get the entire frame loaded
-                return HandleResponse.DATA_STILL_TO_READ;
+                return HandleResponse.DATA_STILL_TO_HANDLED;
             }
         } else {
             // We need more data to get the frame header loaded
-            return HandleResponse.DATA_STILL_TO_READ;
+            return HandleResponse.DATA_STILL_TO_HANDLED;
         }
     }
 
@@ -463,9 +462,9 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         }
 
         // Write the ACK frame to the client
-        outputBuffer.reset();
+        final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
         SettingsFrame.writeAck(outputBuffer);
-        flush(outputBuffer);
+        sendOutput(outputBuffer);
     }
 
     /**
@@ -486,9 +485,9 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // Receivers of a PING frame that does not include an ACK flag MUST send a PING frame with the ACK flag set in
         // response, with an identical frame payload.
         if (!frame.isAck()) {
-            outputBuffer.reset();
+            final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
             PingFrame.writeAck(outputBuffer, frame.getData());
-            flush(outputBuffer);
+            sendOutput(outputBuffer);
         }
     }
 
@@ -553,33 +552,13 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         //      comes back, it finds that the Http2RequestContext has been reused and in a
         //      half-closed state ready for a response! We need to cancel that job and make
         //      sure it never comes back (back to the Future!!)
+        final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
         RstStreamFrame.write(outputBuffer, exception.getCode(), streamId);
-        flush(outputBuffer);
+        sendOutput(outputBuffer);
     }
 
     // =================================================================================================================
     // Http2Connection Methods
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public void flush(OutputBuffer buffer) {
-        // Please note, this method may be called from any thread.
-        // No point in sending an empty buffer!
-        if (buffer.size() > 0) {
-            try {
-                // Go ahead and send that data!
-                buffer.sendContentsToChannel(channel);
-            } catch (IOException e) {
-                // An I/O exception here is fatal to the connection. So we will
-                // do a hard close of the connection (no point trying to send anything
-                // back to the client, since they'll never see it).
-                close(); // FATAL!!!
-                throw new FailedFlushException("Flush failed", e);
-            }
-        }
-    }
 
     /**
      * {@inheritDoc}

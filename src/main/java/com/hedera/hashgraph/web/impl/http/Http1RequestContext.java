@@ -8,8 +8,11 @@ import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.channels.ByteChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import static com.hedera.hashgraph.web.impl.http.Http1Constants.*;
 
@@ -17,9 +20,8 @@ import static com.hedera.hashgraph.web.impl.http.Http1Constants.*;
  * Handles collecting all data for a request and response along with sending the response.
  */
 class Http1RequestContext extends RequestContext {
-    private final OutputBuffer outputBuffer;
-
-    private final Runnable responseSentCallback;
+    private final Consumer<OutputBuffer> sendResponse;
+    private final Supplier<OutputBuffer> checkoutOutputBuffer;
     private BodyInputStream requestBody;
     private ByteChannel channel;
 
@@ -33,13 +35,13 @@ class Http1RequestContext extends RequestContext {
      * Create a new instance.
      *
      * @param dispatcher           The dispatcher to send this request to. Must not be null.
-     * @param outputBuffer
-     * @param responseSentCallback
+     * @param sendResponse
      */
-    protected Http1RequestContext(Dispatcher dispatcher, OutputBuffer outputBuffer, Runnable responseSentCallback) {
+    protected Http1RequestContext(Dispatcher dispatcher, Supplier<OutputBuffer> checkoutOutputBuffer, 
+                                  Consumer<OutputBuffer> sendResponse) {
         super(dispatcher);
-        this.outputBuffer = outputBuffer;
-        this.responseSentCallback = responseSentCallback;
+        this.checkoutOutputBuffer = checkoutOutputBuffer;
+        this.sendResponse = sendResponse;
     }
 
     @Override
@@ -77,9 +79,6 @@ class Http1RequestContext extends RequestContext {
         this.version = version;
     }
 
-    private void responseSent() {
-        responseSentCallback.run();
-    }
 
     void respond(StatusCode statusCode, WebHeaders responseHeaders, String plainTextBody)
             throws ResponseAlreadySentException {
@@ -89,15 +88,14 @@ class Http1RequestContext extends RequestContext {
             responseHeaders.setContentType("text/plain");
             sendHeader(statusCode, responseHeaders);
             // send body
-            outputBuffer.reset();
+            final OutputBuffer outputBuffer = checkoutOutputBuffer.get();
             outputBuffer.write(contentBytes);
             outputBuffer.write(CR);
             outputBuffer.write(LF);
-            outputBuffer.sendContentsToChannel(channel);
+            sendResponse.accept(outputBuffer);
         } catch (IOException e) {
             e.printStackTrace(); // TODO not sure here
-        } finally {
-            responseSent();
+            throw new RuntimeException(e);
         }
     }
 
@@ -105,7 +103,7 @@ class Http1RequestContext extends RequestContext {
         // Add standard response headers
         responseHeaders.setStandardResponseHeaders();
         // SEND DATA
-        outputBuffer.reset();
+        final OutputBuffer outputBuffer = checkoutOutputBuffer.get();
         // send response line
         outputBuffer.write(version.versionString());
         outputBuffer.write(SPACE);
@@ -125,7 +123,7 @@ class Http1RequestContext extends RequestContext {
         });
         outputBuffer.write(CR);
         outputBuffer.write(LF);
-        outputBuffer.sendContentsToChannel(channel);
+        sendResponse.accept(outputBuffer);
     }
 
     // =================================================================================================================
@@ -168,17 +166,71 @@ class Http1RequestContext extends RequestContext {
 //    }
 
     @Override
-    public void respond(StatusCode statusCode) throws ResponseAlreadySentException {
+    public void setResponseStatusCode(StatusCode statusCode) throws ResponseAlreadySentException {
         respond(statusCode, new WebHeadersImpl(), statusCode.code()+" - "+statusCode.message());
     }
 
     @Override
-    public WebResponse respond() throws ResponseAlreadySentException {
-        return null;
+    public WebResponse getResponse() throws ResponseAlreadySentException {
+        return new WebResponse() {
+            @Override
+            public WebHeaders getHeaders() {
+                return null;
+            }
+
+            @Override
+            public WebResponse statusCode(StatusCode code) {
+                return null;
+            }
+
+            @Override
+            public WebResponse body(String bodyAsString) throws ResponseAlreadySentException {
+                return null;
+            }
+
+            @Override
+            public WebResponse body(byte[] bodyAsBytes) throws ResponseAlreadySentException {
+                return null;
+            }
+
+            @Override
+            public OutputStream body() throws ResponseAlreadySentException, IOException {
+                return null;
+            }
+        };
     }
 
     @Override
     public void close() throws Exception {
 
+    }
+
+    private class Http1WebResponse implements WebResponse {
+        private final WebHeaders headers = new WebHeadersImpl();
+
+        @Override
+        public WebHeaders getHeaders() {
+            return headers;
+        }
+
+        @Override
+        public WebResponse statusCode(StatusCode code) {
+            return null;
+        }
+
+        @Override
+        public WebResponse body(String bodyAsString) throws ResponseAlreadySentException {
+            return null;
+        }
+
+        @Override
+        public WebResponse body(byte[] bodyAsBytes) throws ResponseAlreadySentException {
+            return null;
+        }
+
+        @Override
+        public OutputStream body() throws ResponseAlreadySentException, IOException {
+            return null;
+        }
     }
 }

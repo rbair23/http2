@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 /**
@@ -61,7 +62,7 @@ public final class ChannelManager implements AutoCloseable {
 
     /**
      * Threadsafe method to terminate any processing being done by this class and interrupt
-     * the {@link #checkConnections(Duration, AtomicInteger, Function)} method, if it is blocking.
+     * the {@link #checkConnections(Duration, AtomicInteger, BiFunction)} method, if it is blocking.
      */
     public void close() {
         this.shutdown = true;
@@ -89,12 +90,13 @@ public final class ChannelManager implements AutoCloseable {
      *
      * @param timeout Specifies the duration of time to block while waiting for events on idle connections.
      * @param availableConnectionCount The number of available connections that can still be made
-     * @param onRead A callback invoked for each {@link SelectionKey} that has data ready to be read
+     * @param onReadOrWrite A callback invoked for each {@link SelectionKey} that has data ready to be read or write,
+     *                      with boolean true for read and false for write.
      */
     public void checkConnections(
             final Duration timeout,
             final AtomicInteger availableConnectionCount,
-            final Function<SelectionKey, HandleResponse> onRead) throws IOException {
+            final BiFunction<SelectionKey, Boolean, HandleResponse> onReadOrWrite) throws IOException {
         // TODO does the onRead need to tell me whether data was actually read or not? I think probably it does,
         //      otherwise I maybe shouldn't remove the key from the iterator...
 
@@ -130,10 +132,18 @@ public final class ChannelManager implements AutoCloseable {
                 } else if (key == acceptKey && availableConnectionCount.get() > 0) {
                     itr.remove();
                     accept();
-                } else if (key.isReadable()) {
-                    final HandleResponse readResponse = onRead.apply(key);
-                    if (readResponse == HandleResponse.ALL_DATA_READ || readResponse == HandleResponse.CLOSE_CONNECTION) {
-                        itr.remove();
+                } else {
+                    if (key.isWritable()) {
+                        final HandleResponse writeResponse = onReadOrWrite.apply(key, false);
+                        if (writeResponse == HandleResponse.ALL_DATA_HANDLED || writeResponse == HandleResponse.CLOSE_CONNECTION) {
+                            itr.remove();
+                        }
+                    }
+                    if (key.isReadable()) {
+                        final HandleResponse readResponse = onReadOrWrite.apply(key, true);
+                        if (readResponse == HandleResponse.ALL_DATA_HANDLED || readResponse == HandleResponse.CLOSE_CONNECTION) {
+                            itr.remove();
+                        }
                     }
                 }
             } catch (CancelledKeyException cancelledKeyException) {
@@ -159,7 +169,7 @@ public final class ChannelManager implements AutoCloseable {
             if (socketChannel != null) {
                 socketChannel.socket().setTcpNoDelay(noDelay);
                 socketChannel.configureBlocking(false);
-                socketChannel.register(selector, SelectionKey.OP_READ);
+                socketChannel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
             }
         } catch (ClosedChannelException e) {
             System.err.println("Channel Closed Prematurely. Might be OK. Not Sure if we should even log it.");

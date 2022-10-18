@@ -14,7 +14,7 @@ import java.nio.channels.SocketChannel;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 /**
  * Coordinates the work of the {@link ChannelManager} (which handles all networking connections with the clients),
@@ -25,10 +25,10 @@ import java.util.function.Function;
  * When closed, the associated {@link ChannelManager} and other classes will also be closed, and any in-flight
  * requests will be asynchronously canceled (some may still complete, but many will be canceled).
  */
-public final class IncomingDataHandler implements Runnable, AutoCloseable {
+public final class DataHandler implements Runnable, AutoCloseable {
     /**
      * The time we want to allow the {@link ChannelManager} to block waiting for connections
-     * in {@link ChannelManager#checkConnections(Duration, AtomicInteger, Function)}, before giving up if all
+     * in {@link ChannelManager#checkConnections(Duration, AtomicInteger, BiFunction)}, before giving up if all
      * connections are idle. This is low enough so when a server is stopped, it stops relatively
      * quickly, but long enough to keep us from a horrible busy loop consuming the CPU needlessly.
      */
@@ -76,7 +76,7 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
      * @param dispatcher The dispatcher to use for dispatching requests. Cannot be null.
      * @param channelManager The channel manager from which to get data from connections. Cannot be null.
      */
-    public IncomingDataHandler(
+    public DataHandler(
             final WebServerConfig config,
             final Dispatcher dispatcher,
             final ChannelManager channelManager) {
@@ -99,7 +99,7 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
             while (!shutdown) {
                 // Ask the channel manager to process all connections -- add new ones, or call
                 // us back for each existing connection with data to be read.
-                channelManager.checkConnections(DEFAULT_CHANNEL_TIMEOUT, availableConnections, key -> {
+                channelManager.checkConnections(DEFAULT_CHANNEL_TIMEOUT, availableConnections, (key, isRead) -> {
                     if (!shutdown) {
                         final var channel = (SocketChannel) key.channel();
                         // The channel associated with this key has data to be read. If there is
@@ -116,12 +116,16 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
                         }
                         if (channel.isOpen()) {
                             // Delegate to the context to handle the input!
-                            return connectionContext.handle(httpVersion -> upgradeHttpVersion(httpVersion, key));
+                            if (isRead) {
+                                return connectionContext.handleIncomingData(httpVersion -> upgradeHttpVersion(httpVersion, key));
+                            } else {
+                                return connectionContext.handleOutgoingData();
+                            }
                         } else {
                             return HandleResponse.CLOSE_CONNECTION;
                         }
                     }
-                    return HandleResponse.ALL_DATA_READ;
+                    return HandleResponse.ALL_DATA_HANDLED;
                 });
             }
         } catch (IOException fatal) {
@@ -132,6 +136,7 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
             fatal.printStackTrace();
         }
     }
+
 
     /**
      * Handle HTTP version upgrades, only supports HTTP 1.1 to HTTP 2.0 for now
@@ -147,7 +152,7 @@ public final class IncomingDataHandler implements Runnable, AutoCloseable {
             key.attach(http2ChannelSession);
             http2ChannelSession.upgrade(currentConnectionContext);
             // continue handling with HTTP2
-            http2ChannelSession.handle(httpVersion -> upgradeHttpVersion(httpVersion, key));
+            http2ChannelSession.handleIncomingData(httpVersion -> upgradeHttpVersion(httpVersion, key));
         } else {
             throw new RuntimeException("Unsupported HTTP version update");
         }

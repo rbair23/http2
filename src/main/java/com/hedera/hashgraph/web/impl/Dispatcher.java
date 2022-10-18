@@ -56,7 +56,7 @@ public final class Dispatcher {
                     // Oh dang, some exception happened while handling the request. Oof. Well, somebody
                     // needs to send a 500 error.
                     try {
-                        webRequest.respond(StatusCode.INTERNAL_SERVER_ERROR_500);
+                        webRequest.setResponseStatusCode(StatusCode.INTERNAL_SERVER_ERROR_500);
                     } catch (ResponseAlreadySentException e) {
                         throw new RuntimeException(e);
                     }
@@ -66,7 +66,7 @@ public final class Dispatcher {
         } else {
             // Dude, 404
             try {
-                webRequest.respond(StatusCode.NOT_FOUND_404);
+                webRequest.setResponseStatusCode(StatusCode.NOT_FOUND_404);
             } catch (ResponseAlreadySentException e) {
                 throw new RuntimeException(e);
             }

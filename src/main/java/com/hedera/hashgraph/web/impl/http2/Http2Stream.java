@@ -168,7 +168,7 @@ public final class Http2Stream extends RequestContext {
     }
 
     private void sendFrame() throws IOException {
-        connection.flush(responseBuffer);
+        connection.sendOutput(responseBuffer);
     }
 
     // =================================================================================================================
@@ -205,7 +205,7 @@ public final class Http2Stream extends RequestContext {
     }
 
     @Override
-    public WebResponse respond() throws ResponseAlreadySentException {
+    public WebResponse getResponse() throws ResponseAlreadySentException {
         return null;
     }
 
