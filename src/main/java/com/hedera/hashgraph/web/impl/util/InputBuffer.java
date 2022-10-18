@@ -413,10 +413,10 @@ public final class InputBuffer {
      */
     public int peek24BitInteger() {
         assertAvailable(3);
-        int result = bb.get(bb.position()) << 16;
-        result |= bb.get(bb.position() + 1) << 8;
-        result |= bb.get(bb.position() + 2);
-        return result & 0x0000FFFF; // Mask off the upper bits, in case of negative sign extension
+        int result = (bb.get(bb.position()) << 16) & 0x00FF0000;
+        result |= (bb.get(bb.position() + 1) << 8) & 0x0000FF00;
+        result |= (bb.get(bb.position() + 2)) & 0x000000FF;
+        return result & 0x00FFFFFF; // Mask off the upper bits, in case of negative sign extension
     }
 
     /**

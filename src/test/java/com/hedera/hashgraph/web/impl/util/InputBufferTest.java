@@ -828,6 +828,32 @@ class InputBufferTest {
         assertEquals(45678, s2);
     }
 
+    // Found a bug that led to this test
+    @ParameterizedTest
+    @ValueSource(ints = {
+            0b1111_1111_1111_1111_1111_1111,
+            0b0111_1011_1101_1110_1111_1111,
+            0b0011_1001_1100_0111_1011_1101,
+            0b0001_1000_0100_0010_0000_1111,
+            0b0000_0000_0000_0000_0000_0001,
+            0b0000_0000_0000_0000_0000_0000,
+            0b0000_0000_0000_0000_0000_0000,
+            0b1111_1111_1111_1111_1111_1111,
+            0b0111_1011_1101_1110_1111_1111,
+            0b0011_1001_1100_0111_1011_1101,
+            0b0001_1000_0100_0010_0000_1111,
+            0b0000_0000_0000_0000_0000_0001,
+            0b0000_0000_0000_0000_0000_0000,
+    })
+    void read24BitInteger(int i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(int24s(i));
+        buf.addData(channel);
+
+        int result = buf.peek24BitInteger();
+        assertEquals(i, result);
+    }
+
     //----------------------------------------------------------------------------------------
     // peek24BitInteger()
 

@@ -216,7 +216,7 @@ public abstract class Frame {
         }
     }
 
-    protected void parse2(InputBuffer in) {
+    protected void parse2(final InputBuffer in) {
         // Read off the frame length. Validated later.
         this.payloadLength = in.read24BitInteger();
 

@@ -488,7 +488,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // response, with an identical frame payload.
         if (!frame.isAck()) {
             final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
-            PingFrame.writeAck(outputBuffer, frame.getData());
+            frame.writeAck(outputBuffer);
             sendOutput(outputBuffer);
         }
     }
