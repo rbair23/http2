@@ -74,7 +74,7 @@ public final class HeadersFrame extends Frame {
         assert type == FrameType.HEADERS.ordinal() : "Unexpected frame type, was not HEADERS";
         // Get the flags, and interpret a couple of them (since we need to know them when processing
         // the payload body)
-        var flags = in.readByte();
+        var flags = (byte) in.readByte();
         final var priorityFlag = (flags & PRIORITY_FLAG) != 0;
         final var paddedFlag = (flags & PADDED_FLAG) != 0;
         // Get the stream id

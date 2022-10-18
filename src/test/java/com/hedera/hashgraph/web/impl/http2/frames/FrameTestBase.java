@@ -4,10 +4,11 @@ import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import org.junit.jupiter.api.BeforeEach;
 
+import java.util.Arrays;
 import java.util.Random;
 
 class FrameTestBase {
-    private Random rand = new Random(92929);
+    private static final Random RAND = new Random(92929);
     protected InputBuffer inputBuffer;
     protected OutputBuffer outputBuffer;
 
@@ -18,6 +19,10 @@ class FrameTestBase {
     }
 
     void fillInputBuffer() {
+        fillInputBuffer(inputBuffer, outputBuffer);
+    }
+
+    protected void fillInputBuffer(InputBuffer inputBuffer, OutputBuffer outputBuffer) {
         final var out = outputBuffer.getBuffer();
         out.flip();
         final var in = inputBuffer.getBuffer();
@@ -27,7 +32,32 @@ class FrameTestBase {
         in.flip();
     }
 
-    protected long randomLong() {
-        return rand.nextLong();
+    protected static long randomLong() {
+        return RAND.nextLong();
+    }
+
+    /**
+     * Generates some random bytes
+     *
+     * @param length The number of bytes to generate.
+     * @return Some random bytes.
+     */
+    protected static byte[] randomBytes(int length) {
+        final byte[] data = new byte[length];
+        for (int i = 0; i < length; i++) {
+            data[i] = (byte) RAND.nextInt();
+        }
+        return data;
+    }
+
+    protected static Object corrupt(Random rand, byte[] original, int position) {
+        final var corrupted = Arrays.copyOf(original, original.length);
+        final var originalValue = original[position];
+        var corruptedValue = originalValue;
+        while (corruptedValue == originalValue) {
+            corruptedValue = (byte) rand.nextInt();
+        }
+        corrupted[position] = corruptedValue;
+        return corrupted;
     }
 }

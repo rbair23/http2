@@ -233,9 +233,9 @@ public final class InputBuffer {
      * @return A single byte
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
-    public byte readByte() {
+    public int readByte() {
         assertAvailable(1);
-        return bb.get();
+        return bb.get() & 0x000000FF;
     }
 
     /**
@@ -245,9 +245,9 @@ public final class InputBuffer {
      * @return A single byte
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
-    public byte peekByte() {
+    public int peekByte() {
         assertAvailable(1);
-        return bb.get(bb.position());
+        return bb.get(bb.position()) & 0x000000FF;
     }
 
     /**
@@ -257,9 +257,9 @@ public final class InputBuffer {
      * @return A single byte
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
-    public byte peekByte(int numBytesToLookPast) {
+    public int peekByte(int numBytesToLookPast) {
         assertAvailable(1 + numBytesToLookPast);
-        return bb.get(bb.position() + numBytesToLookPast);
+        return bb.get(bb.position() + numBytesToLookPast) & 0x000000FF;
     }
 
     /**
@@ -387,9 +387,9 @@ public final class InputBuffer {
      */
     public int peek16BitInteger() {
         assertAvailable(2);
-        int result = bb.get(bb.position()) << 8;
-        result |= bb.get(bb.position() + 1);
-        return result & 0x0000FFFF; // Mask off the upper bits, in case of negative sign extension
+        int result = (bb.get(bb.position()) << 8) & 0x0000FF00;
+        result |= (bb.get(bb.position() + 1)) & 0x000000FF;
+        return result;
     }
 
     /**
@@ -440,7 +440,6 @@ public final class InputBuffer {
      * @throws IllegalArgumentException If an attempt is made to read more bytes than are available.
      */
     public int peek31BitInteger() {
-        assertAvailable(4);
         return peek31BitInteger(0);
     }
 
@@ -454,7 +453,7 @@ public final class InputBuffer {
      */
     public int peek31BitInteger(int numBytesToLookPast) {
         assertAvailable(4);
-        int result = (bb.get(bb.position() + numBytesToLookPast) << 24) & 0xFF000000;
+        int result = (bb.get(bb.position() + numBytesToLookPast) << 24) & 0x7F000000;
         result |= (bb.get(bb.position() + numBytesToLookPast + 1) << 16) & 0x00FF0000;
         result |= (bb.get(bb.position() + numBytesToLookPast + 2) << 8) & 0x0000FF00;
         result |= (bb.get(bb.position() + numBytesToLookPast + 3)) & 0x000000FF;
@@ -512,10 +511,10 @@ public final class InputBuffer {
      */
     public long peek32BitUnsignedInteger() {
         assertAvailable(4);
-        long result = (bb.get(bb.position()) << 24) & 0xFF000000;
-        result |= (bb.get(bb.position() + 1) << 16) & 0x00FF0000;
-        result |= (bb.get(bb.position() + 2) << 8) & 0x0000FF00;
-        result |= (bb.get(bb.position() + 3)) & 0x000000FF;
+        long result = (bb.get(bb.position()) << 24) & 0x00000000FF000000L;
+        result |= (bb.get(bb.position() + 1) << 16) & 0x0000000000FF0000L;
+        result |= (bb.get(bb.position() + 2) << 8) & 0x000000000000FF00L;
+        result |= (bb.get(bb.position() + 3)) & 0x00000000000000FFL;
         return result;
     }
 

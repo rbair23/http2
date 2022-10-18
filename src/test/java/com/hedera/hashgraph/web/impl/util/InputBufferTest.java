@@ -403,6 +403,31 @@ class InputBufferTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {
+            0b1111_1111,
+            0b0111_1111,
+            0b1011_1111,
+            0b1101_1111,
+            0b1110_1111,
+            0b1111_0111,
+            0b1111_1011,
+            0b1111_1101,
+            0b1111_1110,
+            0b0000_0101,
+            0b1010_1011,
+            0b0011_1101,
+            0b0001_1110,
+    })
+    void peekByte(int i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(new byte[] { (byte) i });
+        buf.addData(channel);
+
+        int result = buf.peekByte();
+        assertEquals(i, result);
+    }
+
     //----------------------------------------------------------------------------------------
     // peekByte(int numBytesToLookPast)
 
@@ -756,6 +781,31 @@ class InputBufferTest {
         assertEquals(25, s2);
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {
+            0b1111_1111,
+            0b0111_1111,
+            0b1011_1111,
+            0b1101_1111,
+            0b1110_1111,
+            0b1111_0111,
+            0b1111_1011,
+            0b1111_1101,
+            0b1111_1110,
+            0b0000_0101,
+            0b1010_1011,
+            0b0011_1101,
+            0b0001_1110,
+    })
+    void read16BitInteger(int i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(int16(i));
+        buf.addData(channel);
+
+        int result = buf.read16BitInteger();
+        assertEquals(i, result);
+    }
+
     //----------------------------------------------------------------------------------------
     // peek16BitInteger()
 
@@ -797,6 +847,31 @@ class InputBufferTest {
         assertEquals(32768, s1);
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {
+            0b1111_1111,
+            0b0111_1111,
+            0b1011_1111,
+            0b1101_1111,
+            0b1110_1111,
+            0b1111_0111,
+            0b1111_1011,
+            0b1111_1101,
+            0b1111_1110,
+            0b0000_0101,
+            0b1010_1011,
+            0b0011_1101,
+            0b0001_1110,
+    })
+    void peek16BitInteger(int i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(int16(i));
+        buf.addData(channel);
+
+        int result = buf.peek16BitInteger();
+        assertEquals(i, result);
+    }
+
     //----------------------------------------------------------------------------------------
     // read24BitInteger()
 
@@ -828,7 +903,6 @@ class InputBufferTest {
         assertEquals(45678, s2);
     }
 
-    // Found a bug that led to this test
     @ParameterizedTest
     @ValueSource(ints = {
             0b1111_1111_1111_1111_1111_1111,
@@ -850,7 +924,7 @@ class InputBufferTest {
         final var channel = new MockReadableChannel(int24s(i));
         buf.addData(channel);
 
-        int result = buf.peek24BitInteger();
+        int result = buf.read24BitInteger();
         assertEquals(i, result);
     }
 
@@ -885,6 +959,31 @@ class InputBufferTest {
         assertEquals(54321, s2);
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {
+            0b1111_1111_1111_1111_1111_1111,
+            0b0111_1011_1101_1110_1111_1111,
+            0b0011_1001_1100_0111_1011_1101,
+            0b0001_1000_0100_0010_0000_1111,
+            0b0000_0000_0000_0000_0000_0001,
+            0b0000_0000_0000_0000_0000_0000,
+            0b0000_0000_0000_0000_0000_0000,
+            0b1111_1111_1111_1111_1111_1111,
+            0b0111_1011_1101_1110_1111_1111,
+            0b0011_1001_1100_0111_1011_1101,
+            0b0001_1000_0100_0010_0000_1111,
+            0b0000_0000_0000_0000_0000_0001,
+            0b0000_0000_0000_0000_0000_0000,
+    })
+    void peek24BitInteger(int i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(int24s(i));
+        buf.addData(channel);
+
+        int result = buf.peek24BitInteger();
+        assertEquals(i, result);
+    }
+
     //----------------------------------------------------------------------------------------
     // read31BitInteger()
 
@@ -916,6 +1015,30 @@ class InputBufferTest {
         assertEquals(Integer.MAX_VALUE, s2);
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {
+            0b1111_1111_1111_1111_1111_1111_1111_1111,
+            0b0111_1011_1101_0101_1101_1110_1111_1111,
+            0b0011_1001_1100_0101_1101_0111_1011_1101,
+            0b0001_1000_0100_0101_1101_0010_0000_1111,
+            0b0000_0000_0000_0101_1101_0000_0000_0001,
+            0b0000_0000_0000_0101_1101_0000_0000_0000,
+            0b0000_0000_0000_0000_0000_0000_0000_0000,
+            0b1111_1111_0101_1101_1111_1111_1111_1111,
+            0b0111_1011_1101_1110_0101_1101_1111_1111,
+            0b0011_1001_1100_0111_1011_0101_1101_1101,
+            0b0001_0101_1101_1000_0100_0010_0000_1111,
+            0b0000_0000_0000_0000_0000_0000_0000_0001
+    })
+    void read31BitInteger(int i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(uints(i));
+        buf.addData(channel);
+
+        int result = buf.read31BitInteger();
+        assertEquals(i & 0x7FFFFFFF, result); // High bit is ignored
+    }
+
     //----------------------------------------------------------------------------------------
     // peek31BitInteger()
 
@@ -945,6 +1068,30 @@ class InputBufferTest {
         assertEquals(25_983_238, s1);
         int s2 = buf.peek31BitInteger();
         assertEquals(25_983_238, s2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {
+            0b1111_1111_1111_1111_1111_1111_1111_1111,
+            0b0111_1011_1101_0101_1101_1110_1111_1111,
+            0b0011_1001_1100_0101_1101_0111_1011_1101,
+            0b0001_1000_0100_0101_1101_0010_0000_1111,
+            0b0000_0000_0000_0101_1101_0000_0000_0001,
+            0b0000_0000_0000_0101_1101_0000_0000_0000,
+            0b0000_0000_0000_0000_0000_0000_0000_0000,
+            0b1111_1111_0101_1101_1111_1111_1111_1111,
+            0b0111_1011_1101_1110_0101_1101_1111_1111,
+            0b0011_1001_1100_0111_1011_0101_1101_1101,
+            0b0001_0101_1101_1000_0100_0010_0000_1111,
+            0b0000_0000_0000_0000_0000_0000_0000_0001
+    })
+    void peek31BitInteger(int i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(uints(i));
+        buf.addData(channel);
+
+        int result = buf.peek31BitInteger();
+        assertEquals(i & 0x7FFFFFFF, result); // High bit is ignored
     }
 
     //----------------------------------------------------------------------------------------
@@ -1010,6 +1157,30 @@ class InputBufferTest {
         assertEquals(Integer.MAX_VALUE, s3);
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {
+            0b1111_1111_1111_1111_1111_1111_1111_1111,
+            0b0111_1011_1101_0101_1101_1110_1111_1111,
+            0b0011_1001_1100_0101_1101_0111_1011_1101,
+            0b0001_1000_0100_0101_1101_0010_0000_1111,
+            0b0000_0000_0000_0101_1101_0000_0000_0001,
+            0b0000_0000_0000_0101_1101_0000_0000_0000,
+            0b0000_0000_0000_0000_0000_0000_0000_0000,
+            0b1111_1111_0101_1101_1111_1111_1111_1111,
+            0b0111_1011_1101_1110_0101_1101_1111_1111,
+            0b0011_1001_1100_0111_1011_0101_1101_1101,
+            0b0001_0101_1101_1000_0100_0010_0000_1111,
+            0b0000_0000_0000_0000_0000_0000_0000_0001
+    })
+    void read32BitInteger(int i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(ints(i));
+        buf.addData(channel);
+
+        int result = buf.read32BitInteger();
+        assertEquals(i, result); // High bit is ignored
+    }
+
     //----------------------------------------------------------------------------------------
     // peek32BitInteger()
 
@@ -1042,6 +1213,30 @@ class InputBufferTest {
         buf.skip(4);
         int s3 = buf.peek32BitInteger();
         assertEquals(123, s3);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {
+            0b1111_1111_1111_1111_1111_1111_1111_1111,
+            0b0111_1011_1101_0101_1101_1110_1111_1111,
+            0b0011_1001_1100_0101_1101_0111_1011_1101,
+            0b0001_1000_0100_0101_1101_0010_0000_1111,
+            0b0000_0000_0000_0101_1101_0000_0000_0001,
+            0b0000_0000_0000_0101_1101_0000_0000_0000,
+            0b0000_0000_0000_0000_0000_0000_0000_0000,
+            0b1111_1111_0101_1101_1111_1111_1111_1111,
+            0b0111_1011_1101_1110_0101_1101_1111_1111,
+            0b0011_1001_1100_0111_1011_0101_1101_1101,
+            0b0001_0101_1101_1000_0100_0010_0000_1111,
+            0b0000_0000_0000_0000_0000_0000_0000_0001
+    })
+    void peek32BitInteger(int i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(ints(i));
+        buf.addData(channel);
+
+        int result = buf.peek32BitInteger();
+        assertEquals(i, result); // High bit is ignored
     }
 
     //----------------------------------------------------------------------------------------
@@ -1081,6 +1276,30 @@ class InputBufferTest {
         assertEquals(0b0000_0000_0000_0000_1111_1111_1111_1111, s2);
         long s3 = buf.read32BitUnsignedInteger();
         assertEquals(0b0000_0000_0000_0000_0101_1010_1111_0000, s3);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {
+            0b1111_1111_1111_1111_1111_1111_1111_1111,
+            0b0111_1011_1101_0101_1101_1110_1111_1111,
+            0b0011_1001_1100_0101_1101_0111_1011_1101,
+            0b0001_1000_0100_0101_1101_0010_0000_1111,
+            0b1000_0000_0000_0101_1101_0000_0000_0001,
+            0b0000_0000_0000_0101_1101_0000_0000_0000,
+            0b0000_0000_0000_0000_0000_0000_0000_0000,
+            0b1111_1111_0101_1101_1111_1111_1111_1111,
+            0b0111_1011_1101_1110_0101_1101_1111_1111,
+            0b0011_1001_1100_0111_1011_0101_1101_1101,
+            0b1001_0101_1101_1000_0100_0010_0000_1111,
+            0b0000_0000_0000_0000_0000_0000_0000_0001
+    })
+    void read32BitUnsignedInteger(int i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(ints(i));
+        buf.addData(channel);
+
+        long result = buf.read32BitUnsignedInteger();
+        assertEquals(i & 0x00000000FFFFFFFFL, result); // High bit is ignored
     }
 
     //----------------------------------------------------------------------------------------
@@ -1123,6 +1342,30 @@ class InputBufferTest {
         assertEquals(0b0000_0000_0000_0000_1111_1111_1111_1111, s3);
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {
+            0b1111_1111_1111_1111_1111_1111_1111_1111,
+            0b0111_1011_1101_0101_1101_1110_1111_1111,
+            0b0011_1001_1100_0101_1101_0111_1011_1101,
+            0b0001_1000_0100_0101_1101_0010_0000_1111,
+            0b1000_0000_0000_0101_1101_0000_0000_0001,
+            0b0000_0000_0000_0101_1101_0000_0000_0000,
+            0b0000_0000_0000_0000_0000_0000_0000_0000,
+            0b1111_1111_0101_1101_1111_1111_1111_1111,
+            0b0111_1011_1101_1110_0101_1101_1111_1111,
+            0b0011_1001_1100_0111_1011_0101_1101_1101,
+            0b1001_0101_1101_1000_0100_0010_0000_1111,
+            0b0000_0000_0000_0000_0000_0000_0000_0001
+    })
+    void peek32BitUnsignedInteger(int i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(ints(i));
+        buf.addData(channel);
+
+        long result = buf.peek32BitUnsignedInteger();
+        assertEquals(i & 0x00000000FFFFFFFFL, result); // High bit is ignored
+    }
+
     //----------------------------------------------------------------------------------------
     // read64BitLong()
 
@@ -1162,8 +1405,29 @@ class InputBufferTest {
         assertEquals(Long.MAX_VALUE, s3);
     }
 
+    @ParameterizedTest
+    @ValueSource(longs = {
+            Long.MIN_VALUE,
+            Integer.MIN_VALUE,
+            -42,
+            -41,
+            0,
+            41,
+            42,
+            Integer.MAX_VALUE,
+            Long.MAX_VALUE
+    })
+    void read64BitLong(long i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(longs(i));
+        buf.addData(channel);
+
+        long result = buf.read64BitLong();
+        assertEquals(i, result); // High bit is ignored
+    }
+
     //----------------------------------------------------------------------------------------
-    // peek32BitInteger()
+    // peek64BitInteger()
 
     @Test
     void peek64BitLongFailsWhenNoDataIsAvailable() {
@@ -1200,6 +1464,27 @@ class InputBufferTest {
         buf.skip(8);
         long s3 = buf.peek64BitLong();
         assertEquals(16_283_665_309L, s3);
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {
+            Long.MIN_VALUE,
+            Integer.MIN_VALUE,
+            -42,
+            -41,
+            0,
+            41,
+            42,
+            Integer.MAX_VALUE,
+            Long.MAX_VALUE
+    })
+    void peek64BitLong(long i) throws IOException {
+        final var buf = new InputBuffer(8);
+        final var channel = new MockReadableChannel(longs(i));
+        buf.addData(channel);
+
+        long result = buf.peek64BitLong();
+        assertEquals(i, result); // High bit is ignored
     }
 
     //----------------------------------------------------------------------------------------
@@ -1261,6 +1546,13 @@ class InputBufferTest {
             fail(e);
             return new byte[0]; // Cannot be reached, the previous "fail" will throw.
         }
+    }
+
+    private byte[] int16(int i) {
+        final var buf = new byte[2];
+        buf[0] = (byte) (i & 0x0000FF00);
+        buf[1] = (byte) (i & 0x000000FF);
+        return buf;
     }
 
     private byte[] int24s(int... ints) {

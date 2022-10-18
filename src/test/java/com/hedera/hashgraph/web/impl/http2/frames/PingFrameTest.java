@@ -190,15 +190,4 @@ class PingFrameTest extends FrameTestBase {
 
         return args.stream();
     }
-
-    private static Object corrupt(Random rand, byte[] original, int position) {
-        final var corrupted = Arrays.copyOf(original, original.length);
-        final var originalValue = original[position];
-        var corruptedValue = originalValue;
-        while (corruptedValue == originalValue) {
-            corruptedValue = (byte) rand.nextInt();
-        }
-        corrupted[position] = corruptedValue;
-        return corrupted;
-    }
 }

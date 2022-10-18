@@ -5,36 +5,82 @@ import com.hedera.hashgraph.web.impl.http2.Http2Exception;
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
-import java.io.IOException;
 import java.util.Objects;
 
 /**
  * The frame for request and response data.
+ *
+ * <p>SPEC 6.1<br>
+ * DATA frames (type=0x00) convey arbitrary, variable-length sequences of octets associated with a stream. One or more
+ * DATA frames are used, for instance, to carry HTTP request or response message contents.
+ *
+ * <p>DATA frames MAY also contain padding. Padding can be added to DATA frames to obscure the size of messages.
+ * Padding is a security feature; see Section 10.7.
+ *
+ * <p>(End Spec)</p>
+ * <p>Note that padding is only meaningful as a security mechanism while the frame is on the wire. Since we don't need
+ * the padding data sent from the client, we can just discard it when parsing. And when the server is creating data
+ * frames and decides to pad, it can do so on the fly and doesn't need it held on the frame itself.
+ *
+ * <p>This means, that while the on-wire PADDED flag may be set, it is NOT set on the {@link DataFrame} after parsing.
  */
 public final class DataFrame extends Frame {
-    private static final int PADDED_FLAG = FIFTH_FLAG;
+    /**
+     * The data for this frame. We provide direct access to this buffer to avoid buffer
+     * copies, so take care with it. It will never be null, but may be larger than the
+     * actual frame data (again, to avoid object churn we don't create new arrays
+     * every time but use this as a buffer).
+     */
+    private byte[] data = new byte[1024];
 
     /**
-     * The data. This may be the complete content if it fits into the maximum frame size,
-     * or it may be just a portion of the data if spread across a DataFrame and one or more ContinuationFrames.
+     * The number of significant bytes in {@link #data}.
      */
-    private byte[] data;
+    private int dataLength = 0;
+
+    /**
+     * Create a new Data Frame.
+     */
+    public DataFrame() {
+        super(FrameType.DATA);
+    }
 
     /**
      * Create a new Data Frame.
      *
-     * @param length The length of this frame. Actually, this can be computed based on some other data...
-     * @param flags The flags
-     * @param streamId The stream ID
-     * @param data The block of data. This is taken as is, and not defensively copied!
+     * @param endStream Whether this frame represents the end-of-stream.
+     * @param streamId The stream ID. Must be positive.
+     * @param data The block of data. This is taken as is, and not defensively copied! Not null.
+     * @param dataLength The number of bytes in {@link #data} that hold meaningful data.
      */
-    public DataFrame(int length, byte flags, int streamId, byte[] data) {
-        super(length, FrameType.DATA, flags, streamId);
+    public DataFrame(boolean endStream, int streamId, byte[] data, int dataLength) {
+        super(dataLength, FrameType.DATA, (byte) (endStream ? 1 : 0), streamId);
         this.data = Objects.requireNonNull(data);
+        this.dataLength = dataLength;
+        if (data.length < dataLength) {
+            throw new IllegalArgumentException("The dataLength cannot exceed the data.length");
+        }
+        if (streamId < 1) {
+            throw new IllegalArgumentException("The stream id cannot be < 1");
+        }
     }
 
+    /**
+     * Gets the data buffer. This is NOT a defensive copy, so take care with it.
+     *
+     * @return The data. This will not be null.
+     */
     public byte[] getData() {
         return data;
+    }
+
+    /**
+     * Gets the number of meaningful bytes in {@link #getData()}.
+     *
+     * @return The number of meaningful bytes. Will not be negative.
+     */
+    public int getDataLength() {
+        return dataLength;
     }
 
     /**
@@ -47,37 +93,56 @@ public final class DataFrame extends Frame {
     }
 
     /**
+     * Specifies whether this frame is the last frame of the stream.
+     *
+     * @param endStream Whether this frame is the last frame of the stream.
+     */
+    public void setEndStream(boolean endStream) {
+        super.setEighthFlag(endStream);
+    }
+
+    /**
+     * Gets whether this frame is padded.
+     *
+     * @return true if padded
+     */
+    private boolean isPadded() {
+        return super.isFifthFlagSet();
+    }
+
+    /**
+     * Clears the padded flag
+     */
+    private void clearPadded() {
+        super.setFifthFlag(false);
+    }
+
+    /**
      * Parses a {@link DataFrame} from the given input stream. The stream must have enough available bytes
      * to read an entire frame before calling this method.
      *
      * @param in The input stream. Cannot be null and must have the entire frame's data buffered up already.
-     * @return A non-null {@link DataFrame}
      */
-    public static DataFrame parse(InputBuffer in) {
+    @Override
+    public void parse2(InputBuffer in) {
         // First, read off the header information. These are the first 9 bytes.
+        super.parse2(in);
 
-        // Read the length off. We will use this to compute the length of fragment data
-        final var frameLength = in.read24BitInteger();
-        // Read past the type. We don't actually need this, but for safety we can assert here
-        final var type = in.readByte();
-        assert type == FrameType.DATA.ordinal() : "Unexpected frame type, was not DATA";
-        // Get the flags, and interpret a couple of them (since we need to know them when processing
-        // the payload body)
-        var flags = in.readByte();
-        final var paddedFlag = (flags & PADDED_FLAG) != 0;
-        // Get the stream id
-        final var streamId = in.read31BitInteger();
+        // Discover whether the parsed header data included a padded flag, then clear it,
+        // since we don't keep padding information in the frame instance
+        final var paddedFlag = isPadded();
+        clearPadded();
 
         // SPEC: 6.1
         // DATA frames MUST be associated with a stream. If a DATA frame is received whose Stream Identifier field is
         // 0x00, the recipient MUST respond with a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+        final var streamId = getStreamId();
         if (streamId == 0) {
             throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
         }
 
-        // The header section (first 9 bytes) have been read. Now we need to read the body. There are
-        // exactly `frameLength` bytes in the body. Some of these may be devoted to state depending
-        // on the `padded` flag. The rest will be actual data.
+        // Note that the "END_STREAM" flag is semantically meaningful in the HTTP2 workflows,
+        // but not during parsing. So we don't care what value is set.
 
         // Get the padLength, if present.
         final var padLength = paddedFlag ? in.readByte() : 0;
@@ -85,32 +150,49 @@ public final class DataFrame extends Frame {
         // Compute the number of bytes that are part of the payload that are part of the block length,
         // and then read the block of fragment data.
         final var extraBytesRead = (paddedFlag ? 1 : 0);
-        final var blockDataLength = frameLength - (padLength + extraBytesRead);
-        final byte[] data = new byte[blockDataLength];
-        in.readBytes(data, 0, blockDataLength);
+        dataLength = getPayloadLength() - (padLength + extraBytesRead);
+        setPayloadLength(dataLength);
+
+        // Resize the data buffer if necessary. Other parts of the system validate that
+        // we are not reading too much data, as per server configuration, so we don't
+        // need to worry about this causing runaway buffer sizes. It could cause memory
+        // churn in the short term as payload sizes stabilize. To mitigate this, we take
+        // the blockDataLength and round it up to 1K block sizes, so at most we would get
+        // maybe 6 resizes.
+        if (this.data == null || this.data.length < dataLength) {
+            final var arrayLength = roundUpToNearestOneK(dataLength);
+            this.data = new byte[arrayLength];
+        }
+
+        // Read the data into the data buffer for this frame
+        in.readBytes(this.data, 0, dataLength);
 
         // Skip any padding that may have been there.
         in.skip(padLength);
-
-        // TODO When I read the data, I don't actually want to read it into a temporary byte array,
-        //      I want to actually read it into the destination array. So this is wrong.
-
-        return new DataFrame(frameLength, flags, streamId, data);
     }
 
-    public static void writeHeader(OutputBuffer out, int streamId, int dataSize) {
-        Frame.writeHeader(out, dataSize, FrameType.DATA, (byte) 0x0, streamId);
-    }
-    public static void writeLastData(OutputBuffer out, int streamId) {
-        Frame.writeHeader(out, 0, FrameType.DATA, (byte) 0x1, streamId);
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void write(OutputBuffer out) {
+        assert getStreamId() != 0 : "Failed to update the stream ID prior to writing";
+        super.write(out);
+        out.write(data, 0, dataLength);
     }
 
-    public static void write(OutputBuffer out, int streamId, boolean last, OutputBuffer frameData) throws IOException {
-        Frame.writeHeader(out, frameData.size(), FrameType.DATA, (byte) 0x0, streamId);
-        out.write(frameData);
-
-        if (last) {
-            Frame.writeHeader(out, 0, FrameType.DATA, (byte) 0x1, streamId);
+    /**
+     * Given a value, round it up to the nearest multiple of 1024.
+     *
+     * @param value The value
+     * @return The rounded up nearest multiple of 1024 to the value
+     */
+    private static int roundUpToNearestOneK(int value) {
+        if (value < 1024) {
+            return 1024;
+        } else {
+            value = Integer.highestOneBit(value);
+            return value << 1;
         }
     }
 }

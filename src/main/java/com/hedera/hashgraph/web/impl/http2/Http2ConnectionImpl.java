@@ -333,7 +333,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      */
     private void handleData() {
         try {
-            final var frame = DataFrame.parse(inputBuffer);
+            final var frame = new DataFrame();
+            frame.parse2(inputBuffer);
             final var streamId = checkStream(frame.getStreamId());
 
             final var stream = streams.get(streamId);

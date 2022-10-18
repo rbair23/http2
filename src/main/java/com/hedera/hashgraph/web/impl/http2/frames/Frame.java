@@ -178,6 +178,10 @@ public abstract class Frame {
         return (flags & FIFTH_FLAG) != 0;
     }
 
+    protected final void setFifthFlag(boolean value) {
+        setFlag(FIFTH_FLAG, value);
+    }
+
     /**
      * Gets whether the sixth flag has been set. This is a convenience for sub classes, which should
      * expose the name of the specific flag, calling this method.
@@ -209,10 +213,14 @@ public abstract class Frame {
     }
 
     protected final void setEighthFlag(boolean value) {
+        setFlag(EIGHTH_FLAG, value);
+    }
+
+    private final void setFlag(int mask, boolean value) {
         if (value) {
-            flags |= 1;
+            flags |= mask;
         } else {
-            flags &= 0;
+            flags &= ~mask;
         }
     }
 
@@ -226,7 +234,7 @@ public abstract class Frame {
                 : "Wrong method called, type mismatch " + type + " not for " + type;
 
         // The flags
-        this.flags = in.readByte();
+        this.flags = (byte) in.readByte();
 
         // The stream ID
         this.streamId = in.read31BitInteger();
