@@ -42,12 +42,34 @@ public final class RstStreamFrame extends Frame {
     }
 
     /**
+     * Sets the stream ID
+     *
+     * @param streamId the stream ID to set
+     * @return a reference to this
+     */
+    @Override
+    public RstStreamFrame setStreamId(int streamId) {
+        assert streamId != 0;
+        return (RstStreamFrame) super.setStreamId(streamId);
+    }
+
+    /**
      * Gets the error code.
      *
      * @return A non-null error code
      */
     public Http2ErrorCode getErrorCode() {
         return errorCode;
+    }
+
+    /**
+     * Sets the error code
+     * @param errorCode The error code. Cannot be null.
+     * @return A reference to this
+     */
+    public RstStreamFrame setErrorCode(final Http2ErrorCode errorCode) {
+        this.errorCode = Objects.requireNonNull(errorCode);
+        return this;
     }
 
     /**

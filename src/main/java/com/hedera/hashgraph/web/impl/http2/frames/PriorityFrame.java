@@ -41,6 +41,18 @@ public final class PriorityFrame extends Frame {
     }
 
     /**
+     * Sets the stream ID
+     *
+     * @param streamId the stream ID to set
+     * @return a reference to this
+     */
+    @Override
+    public PriorityFrame setStreamId(int streamId) {
+        assert streamId != 0;
+        return (PriorityFrame) super.setStreamId(streamId);
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override

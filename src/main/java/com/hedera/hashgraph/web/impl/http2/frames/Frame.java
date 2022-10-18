@@ -119,8 +119,9 @@ public abstract class Frame {
         return streamId;
     }
 
-    public void setStreamId(int streamId) {
+    protected Frame setStreamId(int streamId) {
         this.streamId = streamId;
+        return this;
     }
 
     /**

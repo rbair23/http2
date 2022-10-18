@@ -120,6 +120,56 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
     private int lastSuccessfulStreamId = 0;
 
     /**
+     * A {@link ContinuationFrame} that can be reused for parsing continuation frame data
+     */
+    private final ContinuationFrame continuationFrame = new ContinuationFrame();
+
+    /**
+     * A {@link DataFrame} that can be reused for parsing data frame data
+     */
+    private final DataFrame dataFrame = new DataFrame();
+
+    /**
+     * A {@link GoAwayFrame} that can be reused for parsing GOAWAY frame data
+     */
+    private final GoAwayFrame goAwayFrame = new GoAwayFrame();
+
+    /**
+     * A {@link HeadersFrame} that can be reused for parsing header frame data
+     */
+    private final HeadersFrame headersFrame = new HeadersFrame();
+
+    /**
+     * A {@link PingFrame} that can be reused for parsing ping frame data
+     */
+    private final PingFrame pingFrame = new PingFrame();
+
+    /**
+     * A {@link PriorityFrame} that can be reused for parsing Priority frame data
+     */
+    private final PriorityFrame priorityFrame = new PriorityFrame();
+
+    /**
+     * A {@link RstStreamFrame} that can be reused for parsing reset frame data
+     */
+    private final RstStreamFrame rstStreamFrame = new RstStreamFrame();
+
+    /**
+     * A {@link SettingsFrame} that can be reused for parsing SETTING frame data
+     */
+    private final SettingsFrame settingsFrame = new SettingsFrame();
+
+    /**
+     * A {@link WindowUpdateFrame} that can be reused for parsing window update frame data
+     */
+    private final WindowUpdateFrame windowUpdateFrame = new WindowUpdateFrame();
+
+    /**
+     * A {@link SettingsFrame} used for sending server settings to the client.
+     */
+    private final SettingsFrame serverSettingsFrame;
+
+    /**
      * Create a new instance.
      *
      * @param contextReuseManager The {@link ContextReuseManager} that manages this instance. Must not be null.
@@ -131,6 +181,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // Setup the server settings
         serverSettings.setMaxConcurrentStreams(config.maxConcurrentStreamsPerConnection());
         serverSettings.setMaxHeaderListSize(config.maxHeaderSize());
+        serverSettingsFrame = new SettingsFrame(serverSettings);
     }
 
     // =================================================================================================================
@@ -211,8 +262,9 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             // includes an error code (Section 7) that indicates why the connection is terminating. After sending the
             // GOAWAY frame for an error condition, the endpoint MUST close the TCP connection.
             final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
-            final var frame = new GoAwayFrame(e.getStreamId(), lastSuccessfulStreamId, e.getCode());
-            frame.write(outputBuffer);
+            goAwayFrame.setLastStreamId(lastSuccessfulStreamId)
+                            .setErrorCode(e.getCode());
+            goAwayFrame.write(outputBuffer);
             sendOutput(outputBuffer);
             close();
             return HandleResponse.CLOSE_CONNECTION;
@@ -227,8 +279,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // The server connection preface consists of a potentially empty SETTINGS frame (Section 6.5)
         // that MUST be the first frame the server sends in the HTTP/2 connection.
         final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
-        final var frame = new SettingsFrame(serverSettings);
-        frame.write(outputBuffer);
+        serverSettingsFrame.write(outputBuffer);
         sendOutput(outputBuffer);
         state = State.AWAITING_SETTINGS;
     }
@@ -335,9 +386,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      */
     private void handleData() {
         try {
-            final var frame = new DataFrame();
-            frame.parse2(inputBuffer);
-            final var streamId = checkStream(frame.getStreamId());
+            dataFrame.parse2(inputBuffer);
+            final var streamId = checkStream(dataFrame.getStreamId());
 
             final var stream = streams.get(streamId);
 
@@ -349,7 +399,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
 
             }
 
-            stream.handleDataFrame(frame);
+            stream.handleDataFrame(dataFrame);
         } catch (Http2Exception e) {
             onStreamException(e);
         }
@@ -361,9 +411,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      */
     private void handleHeaders() {
         try {
-            final var frame = new HeadersFrame();
-            frame.parse2(inputBuffer);
-            final var streamId = checkStream(frame.getStreamId());
+            headersFrame.parse2(inputBuffer);
+            final var streamId = checkStream(headersFrame.getStreamId());
 
             // Please, don't try to send the same headers frame twice...
             // Haven't found this situation yet in the spec, but I bet it is there...
@@ -392,7 +441,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             // NOW initialize it. If we initialize first, the header might be the kind that results in the end of
             // the stream, embodying the whole request, which would cause the onClose to be called, so we want
             // to make sure we added things to the map first so it can then be removed
-            stream.handleHeadersFrame(frame);
+            stream.handleHeadersFrame(headersFrame);
         } catch (Http2Exception e) {
             onStreamException(e);
         }
@@ -405,9 +454,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      */
     private void handlePriority() {
         try {
-            final var frame = new PriorityFrame();
-            frame.parse2(inputBuffer);
-            final var streamId = checkStream(frame.getStreamId());
+            priorityFrame.parse2(inputBuffer);
+            final var streamId = checkStream(priorityFrame.getStreamId());
 
             // SPEC: 5.1 Stream States
             // An endpoint MUST NOT send frames other than PRIORITY on a closed stream
@@ -425,7 +473,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
                 }
             }
 
-            stream.handlePriorityFrame(frame);
+            stream.handlePriorityFrame(priorityFrame);
         } catch (Http2Exception e) {
             onStreamException(e);
         }
@@ -436,9 +484,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      * refer to the physical connection, only one of the logical connection streams.
      */
     private void handleRstStream() {
-        final var frame = new RstStreamFrame();
-        frame.parse2(inputBuffer);
-        final var streamId = checkStream(frame.getStreamId());
+        rstStreamFrame.parse2(inputBuffer);
+        final var streamId = checkStream(rstStreamFrame.getStreamId());
 
         // It is an error to receive an RST_STREAM frame for a stream that is already closed,
         // or hasn't been opened.
@@ -447,7 +494,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
         }
 
-        stream.handleRstStreamFrame(frame);
+        stream.handleRstStreamFrame(rstStreamFrame);
     }
 
     /**
@@ -459,9 +506,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         final long formerHeaderTableSize = clientSettings.getHeaderTableSize();
 
         // Merge the settings from the frame into the clientSettings we already have
-        final var frame = new SettingsFrame();
-        frame.parse2(inputBuffer);
-        if (!frame.isAck()) {
+        settingsFrame.parse2(inputBuffer);
+        if (!settingsFrame.isAck()) {
             // If the settings have changed, then recreate the codec
             if (formerMaxHeaderListSize != clientSettings.getMaxHeaderListSize() ||
                     formerHeaderTableSize != clientSettings.getHeaderTableSize()) {
@@ -470,10 +516,10 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
 
             // Write the ACK frame to the client
             final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
-            frame.writeAck(outputBuffer);
+            settingsFrame.writeAck(outputBuffer);
             sendOutput(outputBuffer);
         } else {
-            frame.mergeInto(clientSettings);
+            settingsFrame.mergeInto(clientSettings);
         }
     }
 
@@ -490,14 +536,13 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      * Handles a "ping" frame. This is a connection level frame.
      */
     private void handlePing() {
-        final var frame = new PingFrame();
-        frame.parse2(inputBuffer);
+        pingFrame.parse2(inputBuffer);
         // SPEC: 6.7 PING
         // Receivers of a PING frame that does not include an ACK flag MUST send a PING frame with the ACK flag set in
         // response, with an identical frame payload.
-        if (!frame.isAck()) {
+        if (!pingFrame.isAck()) {
             final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
-            frame.writeAck(outputBuffer);
+            pingFrame.writeAck(outputBuffer);
             sendOutput(outputBuffer);
         }
     }
@@ -564,8 +609,9 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         //      half-closed state ready for a response! We need to cancel that job and make
         //      sure it never comes back (back to the Future!!)
         final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
-        final var frame = new RstStreamFrame(streamId, exception.getCode());
-        frame.write(outputBuffer);
+        rstStreamFrame.setStreamId(streamId)
+                .setErrorCode(exception.getCode());
+        rstStreamFrame.write(outputBuffer);
         sendOutput(outputBuffer);
     }
 

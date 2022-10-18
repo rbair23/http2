@@ -46,20 +46,11 @@ public final class Http2Stream extends RequestContext {
          */
         CLOSED,
         /**
-         * This state is unused, because we do not support PUSH_PROMISE frames (this server doens't
+         * This state is unused, because we do not support PUSH_PROMISE frames (this server doesn't
          * use them, and the client cannot send them to us).
          */
         RESERVED
     }
-
-    /**
-     * Each field block is processed as a discrete unit. Field blocks MUST be transmitted as a contiguous sequence of
-     * frames, with no interleaved frames of any other type or from any other stream. The last frame in a sequence of
-     * HEADERS or CONTINUATION frames has the END_HEADERS flag set. The last frame in a sequence of PUSH_PROMISE or
-     * CONTINUATION frames has the END_HEADERS flag set. This allows a field block to be logically equivalent to a
-     * single frame.
-     */
-    private boolean headerContinuation = false;
 
     /**
      * The HTTP/2.0 stream ID associated with this request
@@ -70,6 +61,13 @@ public final class Http2Stream extends RequestContext {
      * The current state of this stream.
      */
     private State state = State.IDLE;
+
+    /**
+     * Keeps track of whether we have finished processing the headers. True when we see the first
+     * header with END_HEADERS false, and stays true until we see a CONTINUATION frame with
+     * END_HEADERS true;
+     */
+    private boolean headerContinuation = false;
 
     /**
      * A buffer into which we copy the request data as it comes in. At first, we place the decoded header
@@ -109,6 +107,21 @@ public final class Http2Stream extends RequestContext {
             Settings.INITIAL_FRAME_SIZE,
             this::sendRequestOutputBufferContentsAsLastFrame, // when user closes stream send data as frame
             this::sendRequestOutputBufferContentsAsFrame);  // if the user write too much data then send in multiple frames
+
+    /**
+     * A {@link HeadersFrame} that can be reused for responding with header data
+     */
+    private final HeadersFrame responseHeadersFrame = new HeadersFrame();
+
+    /**
+     * A {@link DataFrame} that can be reused for responding with data
+     */
+    private final DataFrame responseDataFrame = new DataFrame();
+
+    /**
+     * A {@link RstStreamFrame} that can be reused for sending reset frame data
+     */
+    private final RstStreamFrame responseRstStreamFrame = new RstStreamFrame();
 
     // =================================================================================================================
     // Constructor & Methods
@@ -219,6 +232,46 @@ public final class Http2Stream extends RequestContext {
     // =================================================================================================================
     // Methods for handling different types of frames. These are called by the connection
 
+    void handleHeadersFrame(final HeadersFrame headersFrame) {
+        // Set the request id, and get all the header data decoded, and so forth.
+        streamId = headersFrame.getStreamId();
+
+        // SPEC: 5.1 Stream States
+        // Sending a HEADERS frame as a client, or receiving a HEADERS frame as a server, causes the stream to
+        // become "open"
+        if (state == State.IDLE) {
+            state = State.OPEN;
+        }
+
+        // TODO If I am already open, does the same headers frame cause me to go half-closed?
+        // The same HEADERS frame can also cause a stream to immediately become "half-closed".
+
+        if (headersFrame.isEndHeaders()) {
+            // I have all the bytes I will need... so I can go and decode them
+            try {
+                final var codec = connection.getHeaderCodec();
+                codec.decode(requestHeaders, new ByteArrayInputStream(headersFrame.getFieldBlockFragment()));
+                method = requestHeaders.getMethod();
+                path = requestHeaders.getPath();
+            } catch (IOException ex) {
+                // SPEC: 4.3 Field Section Compression and Decompression
+                // A decoding error in a field block MUST be treated as a connection error (Section 5.4.1) of type
+                // COMPRESSION_ERROR.
+                throw new Http2Exception(Http2ErrorCode.COMPRESSION_ERROR, streamId);
+            }
+        } else {
+            // We didn't read the entire header so now it is continuation time
+            headerContinuation = true;
+        }
+
+        // It is possible the entire request was just a HEADERS frame, in which case
+        // we can transition directly to respond mode (HALF_CLOSED).
+        if (headersFrame.isEndStream()) {
+            state = State.HALF_CLOSED;
+            dispatcher.dispatch(this);
+        }
+    }
+
     void handleDataFrame(final DataFrame dataFrame) {
         // SPEC: 5.1 Stream States
         // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
@@ -236,52 +289,16 @@ public final class Http2Stream extends RequestContext {
          */
     }
 
-    void handleHeadersFrame(final HeadersFrame headerFrame) {
-        // set the request id, and get all the header data decoded, and so forth.
-        streamId = headerFrame.getStreamId();
-
-        // SPEC: 5.1 Stream States
-        // Sending a HEADERS frame as a client, or receiving a HEADERS frame as a server, causes the stream to
-        // become "open"
-        if (state == State.IDLE) {
-            state = State.OPEN;
-        }
-
-        // TODO If I am already open, does the same headers frame cause me to go half-closed?
-        // The same HEADERS frame can also cause a stream to immediately become "half-closed".
-
-        if (headerFrame.isEndHeaders()) {
-            // I have all the bytes I will need... so I can go and decode them
-            try {
-                final var codec = connection.getHeaderCodec();
-                codec.decode(requestHeaders, new ByteArrayInputStream(headerFrame.getFieldBlockFragment()));
-                method = requestHeaders.getMethod();
-                path = requestHeaders.getPath();
-            } catch (IOException ex) {
-                // SPEC: 4.3 Field Section Compression and Decompression
-                // A decoding error in a field block MUST be treated as a connection error (Section 5.4.1) of type
-                // COMPRESSION_ERROR.
-                throw new Http2Exception(Http2ErrorCode.COMPRESSION_ERROR, streamId);
-            }
-        }
-
-        if (headerFrame.isEndStream()) {
-            state = State.HALF_CLOSED;
-            dispatcher.dispatch(this);
-        }
-    }
-
-    void handlePriorityFrame(PriorityFrame frame) {
+    void handlePriorityFrame(final PriorityFrame priorityFrame) {
         // TODO I don't support this, but if I get one, does the stream become open?
         // If I get priority followed by headers, does it become half-closed?
 
         // Sending or receiving a PRIORITY frame does not affect the state of any stream (Section 5.1). The PRIORITY frame can be sent on a stream in any state, including "idle" or "closed". A PRIORITY frame cannot be sent between consecutive frames that comprise a single field block (Section 4.3).
     }
 
-    void handleRstStreamFrame(RstStreamFrame frame) {
-
-        final int streamId = frame.getStreamId();
-        final var errorCode = frame.getErrorCode();
+    void handleRstStreamFrame(final RstStreamFrame rstStreamFrame) {
+        final int streamId = rstStreamFrame.getStreamId();
+        final var errorCode = rstStreamFrame.getErrorCode();
 
         // SPEC: 5.1 Stream States
         // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
@@ -311,7 +328,7 @@ public final class Http2Stream extends RequestContext {
 
     }
 
-    void handleWindowUpdateFrame(final int streamId) {
+    void handleWindowUpdateFrame(final WindowUpdateFrame windowUpdateFrame) {
         // SPEC: 5.1 Stream States
         // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
         // connection error (Section 5.4.1) of type PROTOCOL_ERROR.
@@ -321,12 +338,21 @@ public final class Http2Stream extends RequestContext {
 
     }
 
-    void handleContinuationFrame(final int streamId) {
+    void handleContinuationFrame(final ContinuationFrame continuationFrame) {
         // SPEC: 5.1 Stream States
         // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
         // connection error (Section 5.4.1) of type PROTOCOL_ERROR.
         if (state == State.IDLE) {
             throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+        }
+
+        if (!headerContinuation) {
+            // TODO throw exception because we should have seen a HEADERS frame or a continuation frame
+            //      without END_HEADERS to be here
+        }
+
+        if (continuationFrame.isEndHeaders()) {
+            headerContinuation = false;
         }
 
     }

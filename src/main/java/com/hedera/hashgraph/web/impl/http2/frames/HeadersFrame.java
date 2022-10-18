@@ -37,6 +37,18 @@ public final class HeadersFrame extends HeadersFrameBase {
     }
 
     /**
+     * Sets the stream ID
+     *
+     * @param streamId the stream ID to set
+     * @return a reference to this
+     */
+    @Override
+    public HeadersFrame setStreamId(int streamId) {
+        assert streamId != 0;
+        return (HeadersFrame) super.setStreamId(streamId);
+    }
+
+    /**
      * Gets whether this is the very last frame of the stream. For many GET requests, the headers frame
      * will be the very last of the stream.
      *

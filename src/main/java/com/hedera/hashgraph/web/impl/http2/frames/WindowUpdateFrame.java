@@ -48,6 +48,17 @@ public final class WindowUpdateFrame extends Frame {
     }
 
     /**
+     * Sets the stream ID
+     *
+     * @param streamId the stream ID to set
+     * @return a reference to this
+     */
+    @Override
+    public WindowUpdateFrame setStreamId(int streamId) {
+        return (WindowUpdateFrame) super.setStreamId(streamId);
+    }
+
+    /**
      * Gets the window size increment
      *
      * @return The window size increment

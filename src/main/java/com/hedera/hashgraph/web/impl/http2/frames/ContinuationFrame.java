@@ -39,6 +39,18 @@ public final class ContinuationFrame extends HeadersFrameBase {
     }
 
     /**
+     * Sets the stream ID
+     *
+     * @param streamId the stream ID to set
+     * @return a reference to this
+     */
+    @Override
+    public ContinuationFrame setStreamId(int streamId) {
+        assert streamId != 0;
+        return (ContinuationFrame) super.setStreamId(streamId);
+    }
+
+    /**
      * Parses a {@link ContinuationFrame} from the given input stream. The stream must have enough available bytes
      * to read an entire frame before calling this method.
      *

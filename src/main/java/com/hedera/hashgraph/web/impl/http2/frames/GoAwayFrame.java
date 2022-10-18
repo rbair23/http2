@@ -5,6 +5,8 @@ import com.hedera.hashgraph.web.impl.http2.Http2Exception;
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
+import java.util.Objects;
+
 /**
  * Represents a GOAWAY HTTP/2 frame.
  *
@@ -85,6 +87,17 @@ public final class GoAwayFrame extends Frame {
      */
     public Http2ErrorCode getErrorCode() {
         return errorCode;
+    }
+
+    public GoAwayFrame setLastStreamId(int lastStreamId) {
+        assert lastStreamId >= 0;
+        this.lastStreamId = lastStreamId;
+        return this;
+    }
+
+    public GoAwayFrame setErrorCode(Http2ErrorCode errorCode) {
+        this.errorCode = Objects.requireNonNull(errorCode);
+        return this;
     }
 
     public int getLastStreamId() {

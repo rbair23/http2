@@ -66,6 +66,18 @@ public final class DataFrame extends Frame {
     }
 
     /**
+     * Sets the stream ID
+     *
+     * @param streamId the stream ID to set
+     * @return a reference to this
+     */
+    @Override
+    public DataFrame setStreamId(int streamId) {
+        assert streamId != 0;
+        return (DataFrame) super.setStreamId(streamId);
+    }
+
+    /**
      * Gets the data buffer. This is NOT a defensive copy, so take care with it.
      *
      * @return The data. This will not be null.
@@ -97,8 +109,9 @@ public final class DataFrame extends Frame {
      *
      * @param endStream Whether this frame is the last frame of the stream.
      */
-    public void setEndStream(boolean endStream) {
+    public DataFrame setEndStream(boolean endStream) {
         super.setEighthFlag(endStream);
+        return this;
     }
 
     /**
