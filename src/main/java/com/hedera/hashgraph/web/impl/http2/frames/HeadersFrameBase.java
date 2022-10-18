@@ -4,6 +4,9 @@ import com.hedera.hashgraph.web.impl.util.InputBuffer;
 
 import java.util.Objects;
 
+/**
+ * A base class for HEADERS and CONTINUATION frames.
+ */
 public abstract class HeadersFrameBase extends Frame {
     /**
      * The data for this frame. We provide direct access to this buffer to avoid buffer

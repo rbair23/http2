@@ -404,7 +404,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      */
     private void handlePriority() {
         try {
-            final var frame = PriorityFrame.parse(inputBuffer);
+            final var frame = new PriorityFrame();
+            frame.parse2(inputBuffer);
             final var streamId = checkStream(frame.getStreamId());
 
             // SPEC: 5.1 Stream States
