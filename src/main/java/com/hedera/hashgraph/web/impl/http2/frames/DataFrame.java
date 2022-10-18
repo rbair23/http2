@@ -101,7 +101,7 @@ public final class DataFrame extends Frame {
     public static void writeHeader(OutputBuffer out, int streamId, int dataSize) {
         Frame.writeHeader(out, dataSize, FrameType.DATA, (byte) 0x0, streamId);
     }
-    public static void writeLastHeader(OutputBuffer out, int streamId) {
+    public static void writeLastData(OutputBuffer out, int streamId) {
         Frame.writeHeader(out, 0, FrameType.DATA, (byte) 0x1, streamId);
     }
 

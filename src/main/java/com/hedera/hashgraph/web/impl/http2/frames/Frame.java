@@ -206,7 +206,7 @@ public abstract class Frame {
      * @param flags The flags
      * @param streamId The stream id
      */
-    static void writeHeader(final OutputBuffer out, int payloadLength, FrameType type, byte flags, int streamId) {
+    public static void writeHeader(final OutputBuffer out, int payloadLength, FrameType type, byte flags, int streamId) {
         out.write24BitInteger(payloadLength);
         out.writeByte(type.ordinal());
         out.writeByte(flags);

@@ -453,18 +453,19 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         final long formerHeaderTableSize = clientSettings.getHeaderTableSize();
 
         // Merge the settings from the frame into the clientSettings we already have
-        SettingsFrame.parseAndMerge(inputBuffer, clientSettings);
+        final var isAck = SettingsFrame.parseAndMerge(inputBuffer, clientSettings);
+        if (!isAck) {
+            // If the settings have changed, then recreate the codec
+            if (formerMaxHeaderListSize != clientSettings.getMaxHeaderListSize() ||
+                    formerHeaderTableSize != clientSettings.getHeaderTableSize()) {
+                recreateCodec();
+            }
 
-        // If the settings have changed, then recreate the codec
-        if (formerMaxHeaderListSize != clientSettings.getMaxHeaderListSize() ||
-                formerHeaderTableSize != clientSettings.getHeaderTableSize()) {
-            recreateCodec();
+            // Write the ACK frame to the client
+            final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
+            SettingsFrame.writeAck(outputBuffer);
+            sendOutput(outputBuffer);
         }
-
-        // Write the ACK frame to the client
-        final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
-        SettingsFrame.writeAck(outputBuffer);
-        sendOutput(outputBuffer);
     }
 
     /**

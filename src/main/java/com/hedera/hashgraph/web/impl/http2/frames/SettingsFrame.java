@@ -62,7 +62,7 @@ public final class SettingsFrame extends Frame {
      * @param in The input stream, cannot be null.
      * @param settings The settings to merge results into. Cannot be null.
      */
-    public static void parseAndMerge(InputBuffer in, Settings settings) {
+    public static boolean parseAndMerge(InputBuffer in, Settings settings) {
         // SPEC: 6.5
         //   A settings frame with a length other than a multiple of 6 bytes MUST be treated as a connection error
         //   of type FRAME_SIZE_ERROR.
@@ -85,17 +85,19 @@ public final class SettingsFrame extends Frame {
             throw new Http2Exception(Http2ErrorCode.FRAME_SIZE_ERROR, readAheadStreamId(in));
         }
 
-        // The settings frame we receive *MAY* be an ACK of the one we sent to the
-        // client. We DO NOT want to apply that frame here!
-        if (ack) {
-            return;
-        }
-
         // SPEC: 6.5
         //   The stream identifier MUST be 0. Otherwise, respond with connection error PROTOCOL_ERROR.
         final var streamId = in.read31BitInteger();
         if (streamId !=0) {
             throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+        }
+
+        // The settings frame we receive *MAY* be an ACK of the one we sent to the
+        // client. We DO NOT want to apply that frame here!
+        if (ack) {
+            // Read off the remaining frameLength bytes
+            in.skip(frameLength);
+            return true;
         }
 
         // Read off all the settings. Each Setting has a 2 byte identifier and a 4 byte value
@@ -152,6 +154,8 @@ public final class SettingsFrame extends Frame {
                 }
             }
         }
+
+        return false;
     }
 
     /**

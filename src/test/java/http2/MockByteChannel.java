@@ -1,8 +1,5 @@
 package http2;
 
-import com.hedera.hashgraph.web.impl.util.InputBuffer;
-import com.hedera.hashgraph.web.impl.util.OutputBuffer;
-
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ByteChannel;
@@ -14,22 +11,14 @@ public class MockByteChannel implements ByteChannel {
     private boolean shouldThrowOnWrite = false;
     private boolean shouldThrowOnClose = false;
 
-    private OutputBuffer dataToSend = new OutputBuffer(1024 * 1024);
-    private InputBuffer dataReceived = new InputBuffer(1024 * 1024);
+    private ByteBuffer dataToSend = ByteBuffer.allocate(1024 * 1024);
+    private ByteBuffer dataReceived = ByteBuffer.allocate(1024 * 1024);
 
     /**
      * Initializes a new instance of this class.
      */
     protected MockByteChannel() {
 
-    }
-
-    public OutputBuffer getDataToSend() {
-        return dataToSend;
-    }
-
-    public InputBuffer getDataReceived() {
-        return dataReceived;
     }
 
     @Override
@@ -42,7 +31,10 @@ public class MockByteChannel implements ByteChannel {
             throw new IOException("Random failure on read");
         }
 
-        return copyFromBuffers(dataToSend.getBuffer(), dst);
+        dataReceived.flip();
+        int length = copyFromBuffers(dataReceived, dst);
+        dataReceived.clear();
+        return length;
     }
 
     @Override
@@ -55,7 +47,7 @@ public class MockByteChannel implements ByteChannel {
             throw new IOException("Random failure on write");
         }
 
-        return copyFromBuffers(src, dataReceived.getBuffer());
+        return copyFromBuffers(src, dataToSend);
     }
 
     @Override
@@ -74,7 +66,7 @@ public class MockByteChannel implements ByteChannel {
 
     private int copyFromBuffers(ByteBuffer src, ByteBuffer dst) {
         // If there is no room in the target buffer, then don't read anything
-        final var dstCurrentWritePosition = dst.limit();
+        final var dstCurrentWritePosition = dst.position();
         final var dstCapacity = dst.capacity();
         final var dstBytesAvailable = dstCapacity - dstCurrentWritePosition;
         if (dstBytesAvailable <= 0) {
@@ -95,8 +87,14 @@ public class MockByteChannel implements ByteChannel {
         System.arraycopy(srcArray, srcCurrentReadPosition, dstArray, dstCurrentWritePosition, bytesToCopy);
 
         src.position(src.position() + bytesToCopy);
-        dst.limit(dst.limit() + bytesToCopy);
+        dst.position(dst.position() + bytesToCopy);
 
         return bytesToCopy;
+    }
+
+    public void sendTo(MockByteChannel other) {
+        dataToSend.flip();
+        copyFromBuffers(dataToSend, other.dataReceived);
+        dataToSend.clear();
     }
 }

@@ -128,10 +128,10 @@ public class OutputBuffer extends OutputStream {
 
     public void write32BitUnsignedInteger(long value) {
         fullIfNotRemaining(Integer.BYTES);
-        buffer.putInt((int) ((value >>> 24) & 0xFF));
-        buffer.putInt((int) ((value >>> 16) & 0xFF));
-        buffer.putInt((int) ((value >>> 8) & 0xFF));
-        buffer.putInt((int) (value & 0XFF));
+        buffer.put((byte) ((value >>> 24) & 0xFF));
+        buffer.put((byte) ((value >>> 16) & 0xFF));
+        buffer.put((byte) ((value >>> 8) & 0xFF));
+        buffer.put((byte) (value & 0XFF));
     }
 
     public void write64BitLong(long pingData) {
