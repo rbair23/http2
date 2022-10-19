@@ -45,7 +45,7 @@ class PingSpecTest extends SpecTest {
      */
     @Test
     void pingBadStreamId() throws IOException {
-        client.submit(FrameType.PING, 0, 0, randomBytes(8))
+        client.submit(FrameType.PING, 0, 1, randomBytes(8))
                 .sendAndReceive();
 
         final var goAway = client.receive(GoAwayFrame.class);
