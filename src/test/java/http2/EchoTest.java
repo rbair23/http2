@@ -67,7 +67,7 @@ class EchoTest {
 ////                .GET()
 ////                .build();
 ////
-////        final var response = client.send(req, HttpResponse.BodyHandlers.ofString());
+////        final var response = client.sendAndReceive(req, HttpResponse.BodyHandlers.ofString());
 ////        System.out.println(response.body());
 //
 //

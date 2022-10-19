@@ -1,4 +1,4 @@
-package http2;
+package http2.spec;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

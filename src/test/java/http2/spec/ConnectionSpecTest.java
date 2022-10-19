@@ -1,14 +1,11 @@
-package http2;
+package http2.spec;
 
-import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.frames.*;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.provider.Arguments;
 
 import java.io.IOException;
-import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -22,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>The SETTINGS frames received from a peer as part of the connection preface MUST be acknowledged (see Section
  * 6.5.3) after sending the connection preface.
  *
- * <p>To avoid unnecessary latency, clients are permitted to send additional frames to the server immediately after
+ * <p>To avoid unnecessary latency, clients are permitted to sendAndReceive additional frames to the server immediately after
  * sending the client connection preface, without waiting to receive the server connection preface
  *
  * <p>Clients and servers MUST treat an invalid connection preface as a connection error (Section 5.4.1) of type
@@ -35,22 +32,20 @@ class ConnectionSpecTest extends SpecTest {
     @Tag(HAPPY_PATH)
     @DisplayName("Client Settings Follows Preface")
     void settingsFollowsPreface() throws IOException {
-        // Write a client settings frame and send it to the server
-        client.settings(new Settings())
-                .send();
+        // Write a client settings frame and send it to the server and get responses
+        client.submitSettings(new Settings()).sendAndReceive();
 
         // On the client, read the settings frame from the server and make sure we actually
         // got settings from the server (TEST_... settings are set on the server by the SpecTest)
-        final var serverSettingsFrame = client.receiveSettings();
+        final var serverSettingsFrame = client.receive(SettingsFrame.class);
         assertEquals(TEST_MAX_CONCURRENT_STREAMS_PER_CONNECTION, serverSettingsFrame.getMaxConcurrentStreams());
 
         // On the client we should also have received the ACK settings object
-        final var ackSettingsFrame = client.receiveSettings();
+        final var ackSettingsFrame = client.receive(SettingsFrame.class);
         assertTrue(ackSettingsFrame.isAck());
 
         // Send an ACK to the server that we received its settings
-        client.ack(serverSettingsFrame);
-        client.send();
+        client.submitSettingsAck(serverSettingsFrame).sendAndReceive();
 
         // We MUST NOT receive another ACK from the server -- they shouldn't ACK the client ACK!!
         assertFalse(client.framesReceived());
@@ -60,24 +55,22 @@ class ConnectionSpecTest extends SpecTest {
     @Tag(HAPPY_PATH)
     @DisplayName("Client Empty Settings Follows Preface")
     void emptySettingsFollowsPreface() throws IOException {
-        // Write a client settings frame and send it to the server
-        final var clientSettingsFrame = new SettingsFrame();
-        client.settings(null).send();
+        // Write a client settings frame and send it to the server and get responses
+        client.submitSettings(null).sendAndReceive();
 
         // On the client, read the settings frame from the server and make sure we actually
         // got settings from the server (TEST_... settings are set on the server by the SpecTest)
-        final var serverSettingsFrame = client.receiveSettings();
+        final var serverSettingsFrame = client.receive(SettingsFrame.class);
         assertEquals(TEST_MAX_CONCURRENT_STREAMS_PER_CONNECTION, serverSettingsFrame.getMaxConcurrentStreams());
 
         // On the client we should also have received the ACK settings object
-        final var ackSettingsFrame = client.receiveSettings();
+        final var ackSettingsFrame = client.receive(SettingsFrame.class);
         assertTrue(ackSettingsFrame.isAck());
 
         // Send an ACK to the server that we received its settings
-        client.ack(serverSettingsFrame);
-        client.send();
+        client.submitSettingsAck(serverSettingsFrame).sendAndReceive();
 
-        // We MUST NOT receive another ACK from the server -- they shouldn't ACk the client ACK!!
+        // We MUST NOT receive another ACK from the server -- they shouldn't ACK the client ACK!!
         assertFalse(client.framesReceived());
     }
 
@@ -89,13 +82,13 @@ class ConnectionSpecTest extends SpecTest {
 //        outputBuffer.write64BitLong(784388230L);
 //        sendToServer();
 //
-//        // Let the server respond to the settings frame and send its response to the client
+//        // Let the server respond to the settings frame and sendAndReceive its response to the client
 //        http2Connection.handleIncomingData(version -> {});
 //        http2Connection.handleOutgoingData();
 //        sendToClient();
 //
 //        // Read off the settings frame that came concurrently from the server
-//        // (The server MAY (and in our case, does) send server Settings before
+//        // (The server MAY (and in our case, does) sendAndReceive server Settings before
 //        // processing the client settings.
 //        final var frame = new SettingsFrame(new Settings());
 //        frame.parse2(inputBuffer);
@@ -111,40 +104,36 @@ class ConnectionSpecTest extends SpecTest {
     @DisplayName("Client Sends Many Frames After It Sends Settings")
     void clientSendsManyFramesWithoutWaiting() throws IOException {
         // Send the settings
-        client.settings(new Settings());
+        client.submitSettings(new Settings());
 
         // Send a ping
-        client.ping(784388230L);
+        client.submitPing(784388230L);
 
         // Send some stuff
         for (int i = 1; i <= 10; i++) {
             // Send a header
-            client.headers(i);
+            client.submitEmptyHeaders(i);
 
             // Send some data
             // TODO If J gets big, I get problems. Not sure why.
             for (int j = 1; j <= 5; j++) {
                 final var data = randomBytes(256);
-                client.data(i, false, data);
+                client.submitEmptyData(i, false, data);
             }
 
             // Send the last data
-            client.data(i, true, new byte[0]);
+            client.submitEmptyData(i, true, new byte[0]);
         }
 
-        client.send();
+        client.sendAndReceive();
 
         // On the client, read the settings frame from the server and make sure we actually
         // got settings from the server (TEST_... settings are set on the server by the SpecTest)
-        final var serverSettingsFrame = client.receiveSettings();
+        final var serverSettingsFrame = client.receive(SettingsFrame.class);
         assertEquals(TEST_MAX_CONCURRENT_STREAMS_PER_CONNECTION, serverSettingsFrame.getMaxConcurrentStreams());
 
         // On the client we should also have received the ACK settings object
-        final var ackSettingsFrame = client.receiveSettings();
+        final var ackSettingsFrame = client.receive(SettingsFrame.class);
         assertTrue(ackSettingsFrame.isAck());
-
-        // Send an ACK to the server that we received its settings
-        client.ack(serverSettingsFrame);
-        client.send();
     }
 }

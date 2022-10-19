@@ -1,4 +1,4 @@
-package http2;
+package http2.spec;
 
 import com.hedera.hashgraph.web.WebRoutes;
 import com.hedera.hashgraph.web.WebServerConfig;
@@ -12,11 +12,10 @@ import org.junit.jupiter.api.BeforeEach;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.LinkedList;
+import java.util.NoSuchElementException;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 abstract class SpecTest {
     protected static final String MALICIOUS = "Malicious";
@@ -31,7 +30,7 @@ abstract class SpecTest {
     protected Server server;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws IOException {
         this.server = new Server();
         this.client = new Client(this.server);
     }
@@ -55,6 +54,7 @@ abstract class SpecTest {
         private OutputBuffer outputBuffer;
         private InputBuffer inputBuffer;
         private Server server;
+        private LinkedList<Frame> receivedFrames = new LinkedList<>();
 
         public Client(Server server) {
             clientChannel = new MockByteChannel();
@@ -64,44 +64,33 @@ abstract class SpecTest {
             this.server.client = this;
         }
 
-        public Client settings(Settings settings) {
-            final var clientSettingsFrame = new SettingsFrame(settings);
-            clientSettingsFrame.write(outputBuffer);
+        public Client submit(Frame frame) {
+            frame.write(outputBuffer);
             return this;
         }
 
-        public Client ack(SettingsFrame settings) {
+        public Client submitSettings(Settings settings) {
+            return submit(new SettingsFrame(settings));
+        }
+
+        public Client submitSettingsAck(SettingsFrame settings) {
             settings.writeAck(outputBuffer);
             return this;
         }
 
-        public Client ping(long data) {
-            new PingFrame(false, data).write(outputBuffer);
-            return this;
+        public Client submitPing(long data) {
+            return submit(new PingFrame(false, data));
         }
 
-        public Client headers(int streamId) {
-            new HeadersFrame(false, streamId, new byte[0], 0)
-                    .write(outputBuffer);
-            return this;
+        public Client submitEmptyHeaders(int streamId) {
+            return submit(new HeadersFrame(false, streamId, new byte[0], 0));
         }
 
-        public Client data(int streamId, boolean endOfStream, byte[] data) {
-            new DataFrame(endOfStream, streamId, data, data.length)
-                    .write(outputBuffer);
-            return this;
+        public Client submitEmptyData(int streamId, boolean endOfStream, byte[] data) {
+            return submit(new DataFrame(endOfStream, streamId, data, data.length));
         }
 
-        public void exchangeSettings() throws IOException {
-            // Write a client settings frame and send it to the server
-            settings(new Settings()).send();
-            final var serverSettingsFrame = receiveSettings();
-            final var ignored = receiveSettings();
-            ack(serverSettingsFrame);
-            send();
-        }
-
-        public void send() throws IOException {
+        public void sendAndReceive() throws IOException {
             final ByteBuffer buffer = outputBuffer.getBuffer();
             buffer.flip();
             clientChannel.write(buffer);
@@ -111,22 +100,76 @@ abstract class SpecTest {
             server.http2Connection.handleIncomingData(s -> {});
             server.http2Connection.handleOutgoingData();
             server.send();
+
+            while (inputBuffer.available(9)) {
+                final var ord = inputBuffer.peekByte(3);
+                final var type = FrameType.valueOf(ord);
+                final Frame frame = switch (type) {
+                    case DATA -> new DataFrame();
+                    case CONTINUATION -> new ContinuationFrame();
+                    case PING -> new PingFrame();
+                    case GO_AWAY -> new GoAwayFrame();
+                    case HEADERS -> new HeadersFrame();
+                    case PRIORITY -> new PriorityFrame();
+                    case RST_STREAM -> new RstStreamFrame();
+                    case SETTINGS -> new SettingsFrame();
+                    case WINDOW_UPDATE -> new WindowUpdateFrame();
+                    default -> null;
+                };
+
+                if (frame != null) {
+                    frame.parse2(inputBuffer);
+                    receivedFrames.add(frame);
+                } else {
+                    inputBuffer.skip(9 + inputBuffer.peek24BitInteger());
+                }
+            }
         }
 
-        public SettingsFrame receiveSettings() {
-            final var serverSettingsFrame = new SettingsFrame();
-            serverSettingsFrame.parse2(inputBuffer);
-            return serverSettingsFrame;
+        public void initializeConnection() throws IOException {
+            // Write a client settings frame and sendAndReceive it to the server
+            submitSettings(new Settings()).sendAndReceive();
+            final var serverSettingsFrame = receive(SettingsFrame.class);
+            final var ignored = receive(SettingsFrame.class);
+            submitSettingsAck(serverSettingsFrame);
+            sendAndReceive();
         }
 
-        public GoAwayFrame receiveGoAway() {
-            final var goAwayFrame = new GoAwayFrame();
-            goAwayFrame.parse2(inputBuffer);
-            return goAwayFrame;
+        public <T extends Frame> T receive() {
+            //noinspection unchecked
+            return (T) receivedFrames.remove();
         }
+
+        public <T extends Frame> T receive(Class<T> clazz) {
+            Frame frame = null;
+            while (frame == null && !receivedFrames.isEmpty()) {
+                frame = receivedFrames.remove();
+                if (clazz.isAssignableFrom(frame.getClass())) {
+                    //noinspection unchecked
+                    return (T) frame;
+                }
+            }
+
+            throw new NoSuchElementException("Could not find a frame of type " + clazz);
+        }
+
 
         public boolean framesReceived() {
-            return inputBuffer.available(1);
+            return !receivedFrames.isEmpty();
+        }
+
+        public boolean serverRespondedWithFrame(FrameType frameType) {
+            for (Frame f : receivedFrames) {
+                if (f.getType() == frameType) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public Client clearReceivedFrames() {
+            receivedFrames.clear();
+            return this;
         }
     }
 

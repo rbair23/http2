@@ -253,7 +253,7 @@ public abstract class Frame {
         }
     }
 
-    protected void parse2(final InputBuffer in) {
+    public void parse2(final InputBuffer in) {
         // Read off the frame length. Validated later.
         this.payloadLength = in.read24BitInteger();
 
@@ -274,7 +274,7 @@ public abstract class Frame {
      *
      * @param out The output stream, which must not be null
      */
-    protected void write(OutputBuffer out) {
+    public void write(final OutputBuffer out) {
         writeHeader(out, payloadLength, type, flags, streamId);
     }
 
