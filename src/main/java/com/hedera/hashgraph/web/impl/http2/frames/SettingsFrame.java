@@ -1,16 +1,11 @@
 package com.hedera.hashgraph.web.impl.http2.frames;
 
-import com.hedera.hashgraph.web.impl.util.InputBuffer;
-import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Exception;
+import com.hedera.hashgraph.web.impl.util.InputBuffer;
+import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
-import java.io.IOException;
-import java.util.Objects;
-
-import static com.hedera.hashgraph.web.impl.http2.frames.Settings.INITIAL_FRAME_SIZE;
-import static com.hedera.hashgraph.web.impl.http2.frames.Settings.MAX_FRAME_SIZE;
-import static com.hedera.hashgraph.web.impl.http2.frames.Settings.MAX_FLOW_CONTROL_WINDOW_SIZE;
+import static com.hedera.hashgraph.web.impl.http2.frames.Settings.*;
 
 /**
  * The settings frame.

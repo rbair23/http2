@@ -49,6 +49,10 @@ abstract class SpecTest {
         return data;
     }
 
+    protected int randomInt() {
+        return rand.nextInt();
+    }
+
     protected final class Client {
         private MockByteChannel clientChannel;
         private OutputBuffer outputBuffer;
@@ -65,12 +69,16 @@ abstract class SpecTest {
         }
 
         public Client submit(FrameType type, int flags, int streamId, byte[] payload) {
-            outputBuffer.write24BitInteger(payload == null ? 0 : payload.length);
+            return submit(type, flags, streamId, payload, 0, payload == null ? 0 : payload.length);
+        }
+
+        public Client submit(FrameType type, int flags, int streamId, byte[] payload, int offset, int length) {
+            outputBuffer.write24BitInteger(payload == null ? 0 : length);
             outputBuffer.writeByte(type.ordinal());
             outputBuffer.writeByte(flags);
             outputBuffer.write32BitInteger(streamId);
             if (payload != null) {
-                outputBuffer.write(payload, 0, payload.length);
+                outputBuffer.write(payload, offset, length);
             }
             return this;
         }
@@ -152,6 +160,14 @@ abstract class SpecTest {
         }
 
         public <T extends Frame> T receive(Class<T> clazz) {
+            final var frame = receiveOrNull(clazz);
+            if (frame == null) {
+                throw new NoSuchElementException("Could not find a frame of type " + clazz);
+            }
+            return frame;
+        }
+
+        public <T extends Frame> T receiveOrNull(Class<T> clazz) {
             Frame frame = null;
             while (frame == null && !receivedFrames.isEmpty()) {
                 frame = receivedFrames.remove();
@@ -161,9 +177,8 @@ abstract class SpecTest {
                 }
             }
 
-            throw new NoSuchElementException("Could not find a frame of type " + clazz);
+            return null;
         }
-
 
         public boolean framesReceived() {
             return !receivedFrames.isEmpty();

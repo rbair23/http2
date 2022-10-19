@@ -1,6 +1,10 @@
 package http2.spec;
 
-import com.hedera.hashgraph.web.impl.http2.frames.*;
+import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
+import com.hedera.hashgraph.web.impl.http2.frames.FrameType;
+import com.hedera.hashgraph.web.impl.http2.frames.GoAwayFrame;
+import com.hedera.hashgraph.web.impl.http2.frames.Settings;
+import com.hedera.hashgraph.web.impl.http2.frames.SettingsFrame;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -10,28 +14,15 @@ import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * This sequence MUST be followed by a SETTINGS frame (Section 6.5), which MAY be empty. The client sends the
- * client connection preface as the first application data octets of a connection.
- *
- * <p>The server connection preface consists of a potentially empty SETTINGS frame (Section 6.5) that MUST be the
- * first frame the server sends in the HTTP/2 connection.
- *
- * <p>The SETTINGS frames received from a peer as part of the connection preface MUST be acknowledged (see Section
- * 6.5.3) after sending the connection preface.
- *
- * <p>To avoid unnecessary latency, clients are permitted to sendAndReceive additional frames to the server immediately after
- * sending the client connection preface, without waiting to receive the server connection preface
- *
- * <p>Clients and servers MUST treat an invalid connection preface as a connection error (Section 5.4.1) of type
- * PROTOCOL_ERROR
+ * Tests for Section 3.4 regarding the sequence for establishing a connection.
  */
 @DisplayName("Section 3.4. HTTP/2 Connection Preface")
 class ConnectionSpecTest extends SpecTest {
 
     @Test
     @Tag(HAPPY_PATH)
-    @DisplayName("Client Settings Follows Preface")
-    void settingsFollowsPreface() throws IOException {
+    @DisplayName("Server Acknowledges Client Settings Receipt")
+    void happyPath() throws IOException {
         // Write a client settings frame and send it to the server and get responses
         client.submitSettings(new Settings()).sendAndReceive();
 
@@ -51,6 +42,26 @@ class ConnectionSpecTest extends SpecTest {
         assertFalse(client.framesReceived());
     }
 
+    /**
+     * SPEC: 3.4<br>
+     * This sequence MUST be followed by a SETTINGS frame (Section 6.5), which MAY be empty.
+     */
+    @Test
+    @Tag(HAPPY_PATH)
+    @DisplayName("Client Settings Follows Preface")
+    void settingsFollowsPreface() throws IOException {
+        // Write a client settings frame and send it to the server and get responses
+        client.submitSettings(new Settings()).sendAndReceive();
+
+        // We must not receive any error
+        final var goAway = client.receiveOrNull(GoAwayFrame.class);
+        assertNull(goAway);
+    }
+
+    /**
+     * SPEC: 3.4<br>
+     * This sequence MUST be followed by a SETTINGS frame (Section 6.5), which MAY be empty.
+     */
     @Test
     @Tag(HAPPY_PATH)
     @DisplayName("Client Empty Settings Follows Preface")
@@ -58,47 +69,55 @@ class ConnectionSpecTest extends SpecTest {
         // Write a client settings frame and send it to the server and get responses
         client.submitSettings(null).sendAndReceive();
 
+        // We must not receive any error
+        final var goAway = client.receiveOrNull(GoAwayFrame.class);
+        assertNull(goAway);
+    }
+
+    /**
+     * Spec: 3.4<br>
+     * The server connection preface consists of a potentially empty SETTINGS frame (Section 6.5) that MUST be the
+     * first frame the server sends in the HTTP/2 connection.
+     */
+    @Test
+    @Tag(HAPPY_PATH)
+    @DisplayName("Server's first response frame is Settings")
+    void firstResponseIsSettings() throws IOException {
+        // Write a client settings frame and send it to the server and get responses
+        client.submitSettings(new Settings()).sendAndReceive();
+
         // On the client, read the settings frame from the server and make sure we actually
         // got settings from the server (TEST_... settings are set on the server by the SpecTest)
         final var serverSettingsFrame = client.receive(SettingsFrame.class);
         assertEquals(TEST_MAX_CONCURRENT_STREAMS_PER_CONNECTION, serverSettingsFrame.getMaxConcurrentStreams());
+    }
+
+    /**
+     * SPEC: 3.4<br>
+     * The SETTINGS frames received from a peer as part of the connection preface MUST be acknowledged
+     * (see Section 6.5.3) after sending the connection preface.
+     */
+    @Test
+    @Tag(HAPPY_PATH)
+    @DisplayName("Server Acknowledges Client Settings Receipt")
+    void serverAcknowledgesClientSettingsReceipt() throws IOException {
+        // Write a client settings frame and send it to the server and get responses
+        client.submitSettings(new Settings()).sendAndReceive();
+
+        // The first frame returned is the server settings frame
+        final var serverSettingsFrame = client.receive(SettingsFrame.class);
+        assertFalse(serverSettingsFrame.isAck());
 
         // On the client we should also have received the ACK settings object
         final var ackSettingsFrame = client.receive(SettingsFrame.class);
         assertTrue(ackSettingsFrame.isAck());
-
-        // Send an ACK to the server that we received its settings
-        client.submitSettingsAck(serverSettingsFrame).sendAndReceive();
-
-        // We MUST NOT receive another ACK from the server -- they shouldn't ACK the client ACK!!
-        assertFalse(client.framesReceived());
     }
 
-//    @Test
-//    @Tag(NEGATIVE)
-//    @DisplayName("Settings Does Not Follow Preface")
-//    void settingsIsSkipped() throws IOException {
-//        Frame.writeHeader(outputBuffer, 8, FrameType.PING, (byte) 0x1, 0);
-//        outputBuffer.write64BitLong(784388230L);
-//        sendToServer();
-//
-//        // Let the server respond to the settings frame and sendAndReceive its response to the client
-//        http2Connection.handleIncomingData(version -> {});
-//        http2Connection.handleOutgoingData();
-//        sendToClient();
-//
-//        // Read off the settings frame that came concurrently from the server
-//        // (The server MAY (and in our case, does) sendAndReceive server Settings before
-//        // processing the client settings.
-//        final var frame = new SettingsFrame(new Settings());
-//        frame.parse2(inputBuffer);
-//
-//        // We should have received a PROTOCOL_ERROR
-//        final var goAway = new GoAwayFrame();
-//        goAway.parse2(inputBuffer);
-//        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
-//    }
-
+    /**
+     * SPEC: 3.4<br>
+     * To avoid unnecessary latency, clients are permitted to sendAndReceive additional frames to the server immediately
+     * after sending the client connection preface, without waiting to receive the server connection preface
+     */
     @Test
     @Tag(HAPPY_PATH)
     @DisplayName("Client Sends Many Frames After It Sends Settings")
@@ -135,5 +154,22 @@ class ConnectionSpecTest extends SpecTest {
         // On the client we should also have received the ACK settings object
         final var ackSettingsFrame = client.receive(SettingsFrame.class);
         assertTrue(ackSettingsFrame.isAck());
+    }
+
+    /**
+     * Spec: 3.4<br>
+     * Clients and servers MUST treat an invalid connection preface as a connection error (Section 5.4.1) of type
+     * PROTOCOL_ERROR
+     */
+    @Test
+    @Tag(NEGATIVE)
+    @DisplayName("Settings Does Not Follow Preface")
+    void settingsIsSkipped() throws IOException {
+        // Submit a ping (and not a client settings)
+        client.submitPing(784388230L).sendAndReceive();
+
+        // We should have received a PROTOCOL_ERROR
+        final var goAway = client.receive(GoAwayFrame.class);
+        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
     }
 }

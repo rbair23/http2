@@ -1,6 +1,19 @@
 package http2.spec;
 
-public class DataFrameSpecTest {
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+
+import java.io.IOException;
+
+@DisplayName("Section 6.7 PING")
+class DataFrameSpecTest extends SpecTest {
+
+    @BeforeEach
+    void setUp() throws IOException {
+        super.setUp();
+        client.initializeConnection();
+    }
+
     // SPEC 6.1
     //
     // TESTS:

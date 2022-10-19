@@ -55,8 +55,6 @@ k
 Lsrc/main/java/com/hedera/hashgraph/web/impl/session/ContextReuseManager.java,4/4/44a098cfc6e10918b8246040842f4caf92491730
 }
 Msrc/main/java/com/hedera/hashgraph/web/impl/session/FailedFlushException.java,9/a/9ab67142dc81d7d7efd7b7062c657eaa318abf4b
-w
-Gsrc/main/java/com/hedera/hashgraph/web/impl/http2/Http2HeaderCodec.java,2/b/2b50c6447b78c1d73eea16f05e038392d712cbed
 s
 Csrc/main/java/com/hedera/hashgraph/web/impl/http2/Http2Headers.java,b/8/b80635ff6d4f24b20db3ef7ffce1865c2a291186
 w

@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
+ * Specification tests for Section 6.7 PING.
  */
 @DisplayName("Section 6.7 PING")
 class PingSpecTest extends SpecTest {
