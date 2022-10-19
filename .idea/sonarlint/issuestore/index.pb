@@ -41,8 +41,6 @@ Esrc/main/java/com/hedera/hashgraph/web/impl/http2/Http2Exception.java,b/4/b446
 build.gradle.kts,d/b/dbcff70658daf80b53ce624f6adcaa529df5ed8d
 Q
 !src/test/java/http1/EchoTest.java,8/8/889084792ca0825f47203391a7233edb17ac024b
-Q
-!src/test/java/http2/EchoTest.java,6/c/6c49fd07738497ab81a3f7d7d507d47a714a744e
 k
 ;src/main/java/com/hedera/hashgraph/web/grpc/GrpcRouter.java,f/9/f987ccffa895bb942e698073ace5f0e152efba10
 y

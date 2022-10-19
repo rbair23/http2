@@ -64,6 +64,17 @@ abstract class SpecTest {
             this.server.client = this;
         }
 
+        public Client submit(FrameType type, int flags, int streamId, byte[] payload) {
+            outputBuffer.write24BitInteger(payload == null ? 0 : payload.length);
+            outputBuffer.writeByte(type.ordinal());
+            outputBuffer.writeByte(flags);
+            outputBuffer.write32BitInteger(streamId);
+            if (payload != null) {
+                outputBuffer.write(payload, 0, payload.length);
+            }
+            return this;
+        }
+
         public Client submit(Frame frame) {
             frame.write(outputBuffer);
             return this;
