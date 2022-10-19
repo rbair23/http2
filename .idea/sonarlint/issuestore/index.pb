@@ -18,8 +18,6 @@ Dsrc/main/java/com/hedera/hashgraph/web/impl/http/Http1Constants.java,8/6/861d1
 v
 Fsrc/main/java/com/hedera/hashgraph/web/impl/http/HttpOutputStream.java,0/3/03a7d8fd9ec3233850b5429579a05815c930f97f
 w
-Gsrc/main/java/com/hedera/hashgraph/web/impl/http2/frames/FrameType.java,e/e/ee6ee2bb2920f0b45464f21092f3133296e7e5e4
-w
 Gsrc/main/java/com/hedera/hashgraph/web/impl/session/HandleResponse.java,5/3/539dea766d77bad36b77ddf1bc07212636b0c292
 ‚
 Rsrc/main/java/com/hedera/hashgraph/web/impl/util/ReusableByteArrayInputStream.java,a/a/aa655b8e0e6980f3097d1abf2c4a2878d4f6a48d
@@ -81,8 +79,6 @@ o
 ?src/main/java/com/hedera/hashgraph/web/impl/ChannelManager.java,0/0/0098be1f07344d28de300ef3c06ce326ff932055
 \
 ,src/test/java/http2/MockExecutorService.java,e/7/e72b2095799134d460066feef0987bb36a231c01
-z
-Jsrc/main/java/com/hedera/hashgraph/web/impl/session/ConnectionContext.java,9/7/972a1cbf44fce5be4f664581ed9f3c20e394b667
 X
 (src/test/java/http2/MockByteChannel.java,d/8/d8b297270055d1d2c02f122819d26b431f4cd2c0
 r
@@ -91,8 +87,6 @@ w
 Gsrc/test/java/com/hedera/hashgraph/web/impl/http2/frames/FrameTest.java,4/7/47108e2e91e62dd8ebe9f75bed555765f02c9bb3
 U
 %src/test/java/http2/PingSpecTest.java,d/4/d4831ba43fdf281b86d898d3b2f8aedd802185cc
-Q
-!src/test/java/http2/SpecTest.java,9/6/960e1916c9660238b3f627d1a1ab0ce24acd847c
 {
 Ksrc/test/java/com/hedera/hashgraph/web/impl/http2/frames/FrameTestBase.java,5/7/570b231ca5d50ec00d6296d96fac399f2b95a864
 {
@@ -101,10 +95,6 @@ Ksrc/test/java/com/hedera/hashgraph/web/impl/http2/frames/PingFrameTest.java,3/
 Ksrc/test/java/com/hedera/hashgraph/web/impl/http2/frames/DataFrameTest.java,3/c/3c380d675b166acd5be275b3942622c8a3a968b3
 v
 Fsrc/test/java/com/hedera/hashgraph/web/impl/http2/Http2StreamTest.java,5/a/5ad3368aff79fe9bf0be881411f751f14778167d
-q
-Asrc/main/java/com/hedera/hashgraph/web/impl/util/InputBuffer.java,c/a/ca92abfda9960bb616eac3f144537416df6ed5a9
-u
-Esrc/test/java/com/hedera/hashgraph/web/impl/util/InputBufferTest.java,4/e/4e9366154661afef92f11224bf1b7710e32589bd
 ~
 Nsrc/main/java/com/hedera/hashgraph/web/impl/http2/frames/HeadersFrameBase.java,d/e/dee63a07516909ba51f327324aff3291c7a9009f
 u

@@ -85,12 +85,14 @@ public final class SettingsFrame extends Frame {
     public SettingsFrame(Settings settings) {
         // The stream for settings is ALWAYS 0
         super(FrameType.SETTINGS);
-        setEnablePush(settings.isEnablePush());
-        setHeaderTableSize(settings.getHeaderTableSize());
-        setInitialWindowSize(settings.getInitialWindowSize());
-        setMaxConcurrentStreams(settings.getMaxConcurrentStreams());
-        setMaxFrameSize(settings.getMaxFrameSize());
-        setMaxHeaderListSize(settings.getMaxHeaderListSize());
+        if (settings != null) {
+            setEnablePush(settings.isEnablePush());
+            setHeaderTableSize(settings.getHeaderTableSize());
+            setInitialWindowSize(settings.getInitialWindowSize());
+            setMaxConcurrentStreams(settings.getMaxConcurrentStreams());
+            setMaxFrameSize(settings.getMaxFrameSize());
+            setMaxHeaderListSize(settings.getMaxHeaderListSize());
+        }
     }
 
     public boolean isAck() {
@@ -98,7 +100,7 @@ public final class SettingsFrame extends Frame {
     }
 
     private boolean isSet(Setting setting) {
-        return (definedSettings & (1 << setting.ordinal())) == 1;
+        return (definedSettings & (1 << setting.ordinal())) != 0;
     }
 
     private void set(Setting setting) {
@@ -218,11 +220,13 @@ public final class SettingsFrame extends Frame {
      */
     @Override
     public void parse2(InputBuffer in) {
+        definedSettings = 0; // Reset it
+
         super.parse2(in);
 
         // SPEC: 6.5
         //   The stream identifier MUST be 0. Otherwise, respond with connection error PROTOCOL_ERROR.
-        final var streamId = in.read31BitInteger();
+        final var streamId = getStreamId();
         if (streamId !=0) {
             throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
         }

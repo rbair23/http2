@@ -126,7 +126,7 @@ public abstract class ConnectionContext implements AutoCloseable {
             while (!waitingForWriteOutputBufferQueue.isEmpty()) {
                 final OutputBuffer outputBuffer = waitingForWriteOutputBufferQueue.peek();
                 final ByteBuffer buffer = outputBuffer.getBuffer();
-                // flip the buffer so it is ready to be written out
+                // flip the buffer, so it is ready to be written out
                 buffer.flip();
 
                 channel.write(buffer);

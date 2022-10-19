@@ -29,11 +29,6 @@ import java.util.function.Consumer;
  */
 public final class Http2ConnectionImpl extends ConnectionContext implements Http2Connection {
     /**
-     * Every frame in HTTP/2.0 is the same size -- 9 bytes.
-     */
-    private static final int FRAME_HEADER_SIZE = 9;
-
-    /**
      * Each frame defines the stream that the frame belongs to. The stream id of "0" denotes
      * frames that belong to the connection itself.
      */
