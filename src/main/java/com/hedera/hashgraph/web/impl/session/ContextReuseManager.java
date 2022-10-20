@@ -1,7 +1,7 @@
 package com.hedera.hashgraph.web.impl.session;
 
 import com.hedera.hashgraph.web.WebServerConfig;
-import com.hedera.hashgraph.web.impl.DataHandler;
+import com.hedera.hashgraph.web.impl.ChannelManager;
 import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.Http2ConnectionImpl;
@@ -71,7 +71,7 @@ public final class ContextReuseManager {
 
     /**
      * Gets an {@link Http1ConnectionContext} instance that can be used for a new channel.
-     * The {@link DataHandler} is responsible to make
+     * The {@link ChannelManager} is responsible to make
      * sure we don't create too many contexts.
      *
      * @return An {@link Http1ConnectionContext} instance ready to be configured. Never null.
@@ -93,7 +93,7 @@ public final class ContextReuseManager {
 
     /**
      * Gets an {@link Http2ConnectionImpl} instance that can be used for a new channel.
-     * The {@link DataHandler} is responsible to make
+     * The {@link ChannelManager} is responsible to make
      * sure we don't create too many contexts.
      *
      * @return An {@link Http2ConnectionImpl} instance ready to be configured. Never null.

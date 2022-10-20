@@ -14,6 +14,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.channels.ByteChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import static com.hedera.hashgraph.web.impl.http.Http1Constants.*;
@@ -59,8 +60,8 @@ public class Http1ConnectionContext extends ConnectionContext {
     /**
      * Create a new instance.
      *
-     * @param contextReuseManager
-     * @param dispatcher
+     * @param contextReuseManager The {@link ContextReuseManager} that manages this instance. Must not be null.
+     * @param dispatcher The dispatcher for handling incoming web requests
      */
     public Http1ConnectionContext(final ContextReuseManager contextReuseManager, final Dispatcher dispatcher) {
         super(contextReuseManager, 16*1024);
@@ -77,7 +78,7 @@ public class Http1ConnectionContext extends ConnectionContext {
     }
 
     @Override
-    public void reset(ByteChannel channel, Runnable onCloseCallback) {
+    public void reset(ByteChannel channel, final BiConsumer<Boolean, ConnectionContext> onCloseCallback) {
         super.reset(channel, onCloseCallback);
         state = State.BEGIN;
         tempHeaderKey = null;

@@ -2,7 +2,7 @@ package com.hedera.hashgraph.web.impl.http2;
 
 import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.WebServerConfig;
-import com.hedera.hashgraph.web.impl.DataHandler;
+import com.hedera.hashgraph.web.impl.ChannelManager;
 import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.frames.*;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
@@ -15,6 +15,7 @@ import com.twitter.hpack.Encoder;
 import java.nio.channels.ByteChannel;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -173,7 +174,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
     public Http2ConnectionImpl(final ContextReuseManager contextReuseManager, final WebServerConfig config) {
         super(contextReuseManager, Settings.INITIAL_FRAME_SIZE);
 
-        // Setup the server settings
+        // Set up the server settings
         serverSettings.setMaxConcurrentStreams(config.maxConcurrentStreamsPerConnection());
         serverSettings.setMaxHeaderListSize(config.maxHeaderSize());
         serverSettingsFrame = new SettingsFrame(serverSettings);
@@ -183,7 +184,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
     // Connection Context Methods
 
     /**
-     * Called by {@link DataHandler} when it realizes that a connection needs to be upgraded from
+     * Called by {@link ChannelManager} when it realizes that a connection needs to be upgraded from
      * HTTP/1.1 to HTTP/2. When that happens, this method is called with the previous context, from which
      * we can fetch any data already present in the previous context.
      *
@@ -197,7 +198,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
     }
 
     @Override
-    public void reset(final ByteChannel channel, final Runnable onCloseCallback) {
+    public void reset(final ByteChannel channel, final BiConsumer<Boolean, ConnectionContext> onCloseCallback) {
         // NOTE: Called on the connection thread
         super.reset(channel, onCloseCallback);
         this.state = State.START;

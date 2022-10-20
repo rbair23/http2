@@ -1,7 +1,7 @@
 package com.hedera.hashgraph.web.impl.session;
 
 import com.hedera.hashgraph.web.HttpVersion;
-import com.hedera.hashgraph.web.impl.DataHandler;
+import com.hedera.hashgraph.web.impl.ChannelManager;
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
@@ -10,6 +10,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ByteChannel;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -21,7 +22,7 @@ import java.util.function.Consumer;
  *
  * <p>Closing the context will close the underlying connection.
  *
- * <p>Each context maintains an "input buffer". As the {@link DataHandler} is alerted to bytes on the underlying
+ * <p>Each context maintains an "input buffer". As the {@link ChannelManager} is alerted to bytes on the underlying
  * channel for a connection, it delegates to the {@link ConnectionContext} to pull those bytes and add them to the
  * input buffer. The context has its own state machine (which differs between HTTP/1.1 and HTTP/2) and, based
  * on the bytes in the input buffer, will advance the state machine. For successful connections, this eventually
@@ -56,17 +57,17 @@ public abstract class ConnectionContext implements AutoCloseable {
     /**
      * The underlying {@link ByteChannel} that we use for reading and writing data.
      */
-    protected ByteChannel channel;
+    private ByteChannel channel;
 
     /**
-     * A callback invoked when the context is closed.
-     * TODO Verify whether this is needed.
+     * A callback invoked when the context is closed. It is passed a boolean, true indicating context is fully closed or
+     * false indicating the context is currently closing but not all pending data has been sent yet.
      */
-    private Runnable onClose;
+    private BiConsumer<Boolean, ConnectionContext> onClose;
 
     /**
      * Keeps track of whether the instance is closed. Set to true in {@link #close()} and set to
-     * false in {@link #reset(ByteChannel, Runnable)}.
+     * false in {@link #reset(ByteChannel, BiConsumer)}.
      */
     private boolean closed = true;
 
@@ -105,6 +106,7 @@ public abstract class ConnectionContext implements AutoCloseable {
         } catch (IOException e) {
             // The underlying channel is closed, we need to clean things up
             e.printStackTrace(); // LOGGING: Need to log this, maybe as trace or debug
+            // TODO should we be sending a 500 response?
             close();
             return HandleResponse.CLOSE_CONNECTION;
         } catch (FailedFlushException e) {
@@ -141,6 +143,7 @@ public abstract class ConnectionContext implements AutoCloseable {
             e.printStackTrace();
             return HandleResponse.CLOSE_CONNECTION;
         }
+
         return HandleResponse.ALL_DATA_HANDLED;
     }
 
@@ -150,10 +153,24 @@ public abstract class ConnectionContext implements AutoCloseable {
      * <br>
      * This method can be called form any thead
      *
+     * TODO Are we happy just doing nothing if closed or should we throw exception?
+     *
      * @param buffer The un-flipped buffer to write
      */
-    public void sendOutput(OutputBuffer buffer) {
-        waitingForWriteOutputBufferQueue.add(buffer);
+    public final void sendOutput(OutputBuffer buffer) {
+        if (!isClosed()) {
+            waitingForWriteOutputBufferQueue.add(buffer);
+        }
+    }
+
+    /**
+     * Check if the client is being good sending data and no timeouts have occurred. This method needs to be very fast
+     * as it is called from busy loop.
+     *
+     * @return true if everything is good or false if the connection has been terminated.
+     */
+    public boolean checkClientIsWellBehaving() {
+        return true; // TODO implement common logic here and sub classes can add their own
     }
 
     /**
@@ -172,8 +189,11 @@ public abstract class ConnectionContext implements AutoCloseable {
      *
      * <p>edu.umd.cs.findbugs.annotations.OverrideMustInvoke
      * @param channel The new channel to hold data for.
+     * @param onCloseCallback   callback invoked when the context is closed. It is passed a boolean, true indicating
+     *                          context is fully closed or false indicating the context is currently closing but not
+     *                          all pending data has been sent yet.
      */
-    public synchronized void reset(ByteChannel channel, Runnable onCloseCallback) {
+    public synchronized void reset(ByteChannel channel, BiConsumer<Boolean, ConnectionContext> onCloseCallback) {
         closed = false;
         this.channel = Objects.requireNonNull(channel);
         this.onClose = onCloseCallback;
@@ -181,49 +201,79 @@ public abstract class ConnectionContext implements AutoCloseable {
         this.waitingForWriteOutputBufferQueue.clear();
     }
 
-    protected boolean isClosed() {
+    /**
+     * Transfer the state from another ConnectionContext of a different version to this one.
+     *
+     * @param prev The previous connection context you want to copy state from
+     */
+    protected void upgrade(ConnectionContext prev) {
+        Objects.requireNonNull(prev);
+        if (prev.isClosed() || prev.isTerminated()) {
+            throw new IllegalStateException(" You can not upgrade a closed or terminated connection context.");
+        }
+        this.channel = prev.channel;
+        this.inputBuffer.init(prev.inputBuffer);
+    }
+
+    /**
+     * Is this connection context closed, closed means it will no longer be read new data and will not accept new data
+     * but will carry on sending buffered data till either it is all sent or the connection has been closed by the
+     * client or calling terminate method.
+     * @return if this context is closed, will be true if closed or terminated
+     */
+    public boolean isClosed() {
         return closed;
     }
 
+    /**
+     * Close this context, this will finish writing all buffered data then close channel to client and clean up all
+     * resources.
+     */
     @Override
     public void close() {
         System.out.println("ConnectionContext.close");
         if (!closed) {
             this.closed = true;
-
-            try {
-                // TODO We do NOT want to do this for Http2RequestContext, but we do want those contexts to
-                //      transition the "closed" flag.
-                this.channel.close();
-            } catch (IOException ignored) {
-                // TODO Maybe a warning? Or an info? Or maybe just debug logging.
+            if (!channel.isOpen()) {
+                // the channel is already closed so just close immediately as we can not finish sending data
+                terminate();
             }
-
-            this.channel = null;
-            this.inputBuffer.reset();
-            this.waitingForWriteOutputBufferQueue.clear();
-
+        } else {
+            // notify callback that we are starting closing
             if (this.onClose != null) {
-                this.onClose.run();
+                this.onClose.accept(true, this);
             }
         }
     }
 
     /**
-     * Gets the channel associated with this context.
-     * @return The reference to the channel, or null if the context is closed.
-     * @throws IllegalStateException if the context has already been closed
+     * Is this connection context terminated, it is terminated when the channel is closed and no further communication
+     * is possible.
+     *
+     * @return True if terminated
      */
-    protected ByteChannel getChannel() {
-        if (closed) {
-            throw new IllegalStateException("The context has already been closed");
-        }
-
-        return channel;
+    public boolean isTerminated() {
+        return channel == null | !channel.isOpen();
     }
 
-    protected void upgrade(ConnectionContext prev) {
-        this.channel = prev.getChannel();
-        this.inputBuffer.init(prev.inputBuffer);
+    /**
+     * Terminate closes the channel and ends all communication without sending any buffered data or doing any more work
+     */
+    protected void terminate() {
+        if (channel.isOpen()) {
+            try {
+                this.channel.close();
+            } catch (IOException ignored) {
+                // TODO Maybe a warning? Or an info? Or maybe just debug logging.
+                ignored.printStackTrace();
+            }
+        }
+        this.channel = null;
+        this.inputBuffer.reset();
+        this.waitingForWriteOutputBufferQueue.clear();
+        // notify callback that we are fully closed
+        if (this.onClose != null) {
+            this.onClose.accept(true, this);
+        }
     }
 }

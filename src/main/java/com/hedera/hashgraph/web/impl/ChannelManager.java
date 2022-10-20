@@ -1,72 +1,143 @@
 package com.hedera.hashgraph.web.impl;
 
+import com.hedera.hashgraph.web.HttpVersion;
+import com.hedera.hashgraph.web.WebServerConfig;
+import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
+import com.hedera.hashgraph.web.impl.http2.Http2ConnectionImpl;
+import com.hedera.hashgraph.web.impl.session.ConnectionContext;
+import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
 import com.hedera.hashgraph.web.impl.session.HandleResponse;
 
 import java.io.IOException;
 import java.nio.channels.*;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.BiFunction;
-import java.util.function.Function;
 
 /**
- * Manages the set of all open connections on a single {@link ServerSocketChannel}. Listens to "accept"
- * and "read ready" NIO events.
+ * Handles all networking connections with the clients and reading/writing data to those clients. Also, the logic for
+ * processing those incoming request bytes to turn them into
+ * {@link com.hedera.hashgraph.web.WebRequest}s, and the {@link Dispatcher} for dispatching
+ * {@link com.hedera.hashgraph.web.WebRequest}s.
+ * <p>
+ * When closed, all associated classes will also be closed, and any in-flight requests will be asynchronously canceled
+ * (some may still complete, but many will be canceled).
  */
-public final class ChannelManager implements AutoCloseable {
+public final class ChannelManager implements Runnable, AutoCloseable {
+    /**
+     * The time we want to allow to block waiting for connections or new data from connections before giving up if all
+     * connections are idle. This is low enough so when a server is stopped, it stops relatively quickly, but long
+     * enough to keep us from a horrible busy loop consuming the CPU needlessly.
+     */
+    private static final Duration DEFAULT_CHANNEL_TIMEOUT = Duration.ofMillis(500);
+
+    /**
+     * The maximum number of connections we iterate over checking thier well-being on each loop
+     */
+    private static final int MAX_CONNECTIONS_TO_CHECK_PER_LOOP = 10;
+
     /**
      * This is the channel we will be listening for connections on
      */
-    private final ServerSocketChannel ssc;
+    private final ServerSocketChannel serverSocketChannel;
 
     /**
-     * NIO Selector for listening to "accept" and "read" events of connections on the {@link #ssc}.
+     * NIO Selector for listening to "accept" and "read" events of connections on the {@link #serverSocketChannel}.
      */
     private final Selector selector;
 
     /**
-     * This key is used to look up "accept" events from the {@link #ssc}, and to close down the
+     * This key is used to look up "accept" events from the {@link #serverSocketChannel}, and to close down the
      * socket when we're done.
      */
     private final SelectionKey acceptKey;
 
     /**
-     * Indicates whether the TCP socket option TCP_NODELAY should be set on new connections.
+     * The web server's configuration. This will not be null.
      */
-    private final boolean noDelay;
+    private final WebServerConfig config;
 
     /**
-     * Flag set by the {@link #close()} method, generally by a different thread, to interrupt any
-     * processing this class may be doing, and to interrupt the {@link #selector}.
+     * The number of additional connections that can be made. There is a configurable upper limit.
+     * As a new connection is made, this number is decremented. As the connection is closed,
+     * the number is incremented.
+     */
+    private final AtomicInteger availableConnections;
+
+    /**
+     * This is a utility class used for reusing the different {@link ConnectionContext} types and subtypes.
+     */
+    private final ContextReuseManager contextReuseManager;
+
+    /**
+     * List of all active connection contexts
+     */
+    private final List<ConnectionContext> connectionContexts = new ArrayList<>();
+
+    /**
+     * Cursor for current position iterating over {@see connectionContexts} for checking them.
+     */
+    private int connectionContextsCursor = 0;
+
+    /**
+     * Set by the {@link #close()} method when it is time to stop the dispatcher.
+     * This is read by one thread, and set by another.
      */
     private volatile boolean shutdown = false;
 
     /**
-     * Creates a new instance.
+     * Create a new instance. This instance can <b>NOT</b> be safely called from other threads,
+     * except for the {@link #close()} method, which can be called from any thread.
      *
-     * @param ssc The {@link ServerSocketChannel} to listen to. This channel must be bound already,
-     *            and must not be null.
-     * @param noDelay Indicates whether the TCP socket option TCP_NODELAY should be set on new connections.
-     * @throws IOException If we are unable to open a selector or register it with the channel.
+     * @param config The configuration for the web server. Cannot be null.
+     * @param dispatcher The dispatcher to use for dispatching requests. Cannot be null.
+     * @param serverSocketChannel The server socket channel we are managing.
      */
-    public ChannelManager(final ServerSocketChannel ssc, final boolean noDelay) throws IOException {
-        this.ssc = Objects.requireNonNull(ssc);
+    public ChannelManager(
+            final WebServerConfig config,
+            final Dispatcher dispatcher,
+            final ServerSocketChannel serverSocketChannel) throws IOException {
+        this.config = Objects.requireNonNull(config);
+        Objects.requireNonNull(dispatcher); // used by subclasses
+        this.availableConnections = new AtomicInteger(config.maxIdleConnections());
+        this.contextReuseManager = new ContextReuseManager(dispatcher, config);
+        this.serverSocketChannel = Objects.requireNonNull(serverSocketChannel);
 
         // Create the listener key for listening to new connection "accept" events
         this.selector = Selector.open();
-        this.acceptKey = ssc.register(selector, SelectionKey.OP_ACCEPT);
-        this.noDelay = noDelay;
+        this.acceptKey = this.serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
     }
 
     /**
-     * Threadsafe method to terminate any processing being done by this class and interrupt
-     * the {@link #checkConnections(Duration, AtomicInteger, BiFunction)} method, if it is blocking.
+     * Runs until {@link #close()} is called, or the underlying socket connection fails.
+     * This method will iterate over all connections, reading data, processing the data,
+     * and dispatching it to the appropriate {@link com.hedera.hashgraph.web.WebRequestHandler}.
+     */
+    @Override
+    public void run() {
+        try {
+            // Continue working until we are shutdown or the socket connection fails us
+            while (!shutdown) {
+                checkConnections();
+            }
+        } catch (IOException fatal) {
+            // A fatal IOException has happened. This will stop the web server. We need to publish this
+            // quite loudly. I don't yet have any logging strategy in this code (OOPS), so for now I
+            // am just going to have to do system.err.
+            System.err.println("WEBSERVER - FATAL. Underlying socket has probably been closed on us");
+            fatal.printStackTrace();
+        }
+    }
+
+    /**
+     * Threadsafe method to terminate any processing being done by this class as soon as possible without interrupting
+     * run thread.
      */
     public void close() {
         this.shutdown = true;
-
         // Call the selector just to process the canceled keys (see ServerImpl.java)
         try {
             selector.wakeup();
@@ -88,21 +159,11 @@ public final class ChannelManager implements AutoCloseable {
      * {@link #close()} method will also interrupt this blocking operation, but should only be used when you are
      * done with this instance.
      *
-     * @param timeout Specifies the duration of time to block while waiting for events on idle connections.
-     * @param availableConnectionCount The number of available connections that can still be made
-     * @param onReadOrWrite A callback invoked for each {@link SelectionKey} that has data ready to be read or write,
-     *                      with boolean true for read and false for write.
      */
-    public void checkConnections(
-            final Duration timeout,
-            final AtomicInteger availableConnectionCount,
-            final BiFunction<SelectionKey, Boolean, HandleResponse> onReadOrWrite) throws IOException {
-        // TODO does the onRead need to tell me whether data was actually read or not? I think probably it does,
-        //      otherwise I maybe shouldn't remove the key from the iterator...
-
+    private void checkConnections() throws IOException {
         // Check for available keys. This call blocks until either some keys are available,
         // or until the timeout is reached.
-        int numKeysAvailable = selector.select(timeout.toMillis());
+        int numKeysAvailable = selector.select(DEFAULT_CHANNEL_TIMEOUT.toMillis());
 
         // We found no keys, so we can just return.
         if (numKeysAvailable == 0) {
@@ -129,21 +190,48 @@ public final class ChannelManager implements AutoCloseable {
                 if (!key.isValid()) {
                     System.out.println("NON VALID KEY FOUND");
                     itr.remove();
-                } else if (key == acceptKey && availableConnectionCount.get() > 0) {
+                } else if (key == acceptKey && availableConnections.get() > 0) { // handle accept
                     itr.remove();
                     accept();
-                } else {
-                    if (key.isWritable()) {
-                        final HandleResponse writeResponse = onReadOrWrite.apply(key, false);
-                        if (writeResponse == HandleResponse.ALL_DATA_HANDLED || writeResponse == HandleResponse.CLOSE_CONNECTION) {
-                            itr.remove();
-                        }
+                } else { // handle read/write
+                    final var channel = (SocketChannel) key.channel();
+                    // The channel associated with this key has data to be read. If there is
+                    // an attachment, then it means we've seen this key before, so we can just
+                    // reuse it. If we haven't seen it before, then we'll get a ChannelData and get
+                    // it setup.
+                    var connectionContext = (ConnectionContext) key.attachment();
+                    // check if newly accepted channel that we have never seen before
+                    if (connectionContext == null) {
+                        // Always start with HTTP/1.1
+                        connectionContext = contextReuseManager.checkoutHttp1ConnectionContext();
+                        connectionContext.reset(channel, this::handleOnClose);
+                        key.attach(connectionContext);
+                        availableConnections.decrementAndGet();
+                        connectionContexts.add(connectionContext);
                     }
-                    if (key.isReadable()) {
-                        final HandleResponse readResponse = onReadOrWrite.apply(key, true);
-                        if (readResponse == HandleResponse.ALL_DATA_HANDLED || readResponse == HandleResponse.CLOSE_CONNECTION) {
-                            itr.remove();
-                        }
+                    // check if channel is closed
+                    if (!channel.isOpen()) {
+                        // we can not do anything if the channel is closed
+                        connectionContext.close();
+                        itr.remove();
+                        continue;
+                    }
+                    // channel is open so now see if it is ready for read or write
+                    HandleResponse readResponse = HandleResponse.ALL_DATA_HANDLED;
+                    HandleResponse writeResponse = HandleResponse.ALL_DATA_HANDLED;
+                    // do all writes
+                    if (key.isWritable()) {
+                        writeResponse = connectionContext.handleOutgoingData();
+                    }
+                    // do all reads
+                    if (key.isReadable() && !connectionContext.isClosed()) {
+                        readResponse = connectionContext.handleIncomingData(httpVersion -> upgradeHttpVersion(httpVersion, key));
+                    }
+                    // close connection context if needed
+                    if (readResponse == HandleResponse.CLOSE_CONNECTION || writeResponse == HandleResponse.CLOSE_CONNECTION) {
+                        connectionContext.close();
+                    } else if(readResponse == HandleResponse.ALL_DATA_HANDLED && writeResponse == HandleResponse.ALL_DATA_HANDLED) {
+                        itr.remove();
                     }
                 }
             } catch (CancelledKeyException cancelledKeyException) {
@@ -151,13 +239,54 @@ public final class ChannelManager implements AutoCloseable {
                 System.out.println("NON VALID KEY FOUND");
                 itr.remove();
             }
+            // check all connections are well-behaved
+            for (int i = 0; i < MAX_CONNECTIONS_TO_CHECK_PER_LOOP; i++, connectionContextsCursor ++) {
+                if (connectionContextsCursor >= connectionContexts.size()) {
+                    connectionContextsCursor = 0;
+                }
+                final ConnectionContext cc = connectionContexts.get(connectionContextsCursor);
+                if (cc.isTerminated() || !cc.checkClientIsWellBehaving()) {
+                    connectionContexts.remove(connectionContextsCursor);
+                    // we just changed index
+                    connectionContextsCursor = Math.min(0, connectionContextsCursor -1);
+                }
+            }
         }
     }
 
+    private void handleOnClose(boolean isFullyClosed, ConnectionContext closedConnectionContext) {
+        if (isFullyClosed) {
+            availableConnections.incrementAndGet();
+        } else {
+            connectionContexts.add(closedConnectionContext);
+        }
+    }
+
+    /**
+     * Handle HTTP version upgrades, only supports HTTP 1.1 to HTTP 2.0 for now
+     *
+     * @param version The version we are upgrading to
+     * @param key The selection key for channel we are upgrading
+     */
+    private void upgradeHttpVersion(final HttpVersion version, final SelectionKey key) {
+        if (version == HttpVersion.HTTP_2) {
+            Http1ConnectionContext currentConnectionContext = (Http1ConnectionContext) key.attachment();
+            Http2ConnectionImpl http2ChannelSession = contextReuseManager.checkoutHttp2ConnectionContext();
+            http2ChannelSession.reset((SocketChannel) key.channel(), this::handleOnClose);
+            key.attach(http2ChannelSession);
+            http2ChannelSession.upgrade(currentConnectionContext);
+            // continue handling with HTTP2
+            http2ChannelSession.handleIncomingData(httpVersion -> upgradeHttpVersion(httpVersion, key));
+        } else {
+            throw new RuntimeException("Unsupported HTTP version update");
+        }
+    }
+
+    // TODO remove - temporary for print statement
     private final AtomicLong count = new AtomicLong(0);
 
     /**
-     * Accepts a new socket connection, registering to listen to read events on it.
+     * Accepts a new socket connection, registering to listen to read and write events on it.
      */
     private void accept() {
         try {
@@ -165,9 +294,10 @@ public final class ChannelManager implements AutoCloseable {
             // Go ahead and accept the socket channel and configure it
             // TODO Make sure we have a configured upper limit on number of active connections
             // and keep track of that information
-            final var socketChannel = ssc.accept();
+            final var socketChannel = serverSocketChannel.accept();
             if (socketChannel != null) {
-                socketChannel.socket().setTcpNoDelay(noDelay);
+                socketChannel.socket().setTcpNoDelay(config.noDelay());
+                // TODO socketChannel.socket().setSoTimeout(config.); // not sure it effects non-blocking calls
                 socketChannel.configureBlocking(false);
                 socketChannel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
             }
