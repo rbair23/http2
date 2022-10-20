@@ -103,7 +103,7 @@ class Http2StreamTest {
         connection.getHeaderCodec().encode(requestHeaders, out);
 
         final var bytes = out.toByteArray();
-        final var headerFrame = new HeadersFrame(true, 1, bytes, bytes.length);
+        final var headerFrame = new HeadersFrame(true, false, 1, bytes, bytes.length);
 
         // Because the header frame is complete AND has "endOfStream" set to true, calling this method
         // will cause the handler to be called, and the response header to be sent to the connection

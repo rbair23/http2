@@ -13,9 +13,6 @@ import java.util.Objects;
  * The frame for carrying request and response headers.
  */
 public final class HeadersFrame extends HeadersFrameBase {
-    // Constants for the different flags used by this frame
-    private static final int PRIORITY_FLAG = THIRD_FLAG;
-    private static final int PADDED_FLAG = FIFTH_FLAG;
 
     /**
      * Create a new Headers Frame.
@@ -27,13 +24,15 @@ public final class HeadersFrame extends HeadersFrameBase {
     /**
      * Create a new Headers Frame.
      *
+     * @param endHeaders Whether this is the end of the headers
      * @param endStream Whether this frame represents the end-of-stream.
      * @param streamId The stream ID. Must be positive.
      * @param fieldBlockFragment The block of data. This is taken as is, and not defensively copied! Not null.
      * @param blockLength The number of bytes in {@code fieldBlockFragment} that hold meaningful data.
      */
-    public HeadersFrame(boolean endStream, int streamId, byte[] fieldBlockFragment, int blockLength) {
-        super(FrameType.HEADERS, endStream, streamId, fieldBlockFragment, blockLength);
+    public HeadersFrame(boolean endHeaders, boolean endStream, int streamId, byte[] fieldBlockFragment, int blockLength) {
+        super(FrameType.HEADERS, endHeaders, streamId, fieldBlockFragment, blockLength);
+        setEndStream(endStream);
     }
 
     /**
@@ -49,6 +48,22 @@ public final class HeadersFrame extends HeadersFrameBase {
     }
 
     /**
+     * Gets whether the priority flag is set.
+     * @return True if the priority flag is set
+     */
+    public boolean isPriority() {
+        return isThirdFlagSet();
+    }
+
+    /**
+     * Gets whether the padded flag is set.
+     * @return True if the padded flag is set
+     */
+    public boolean isPadded() {
+        return isFifthFlagSet();
+    }
+
+    /**
      * Gets whether this is the very last frame of the stream. For many GET requests, the headers frame
      * will be the very last of the stream.
      *
@@ -56,6 +71,15 @@ public final class HeadersFrame extends HeadersFrameBase {
      */
     public boolean isEndStream() {
         return super.isEighthFlagSet();
+    }
+
+    /**
+     * Sets the end stream flag to {@code value}.
+     *
+     * @param value The value for the end stream flag.
+     */
+    public void setEndStream(boolean value) {
+        super.setEighthFlag(value);
     }
 
     /**
@@ -79,9 +103,8 @@ public final class HeadersFrame extends HeadersFrameBase {
 
         // Get the flags, and interpret a couple of them (since we need to know them when processing
         // the payload body)
-        var flags = (byte) in.readByte();
-        final var priorityFlag = (flags & PRIORITY_FLAG) != 0;
-        final var paddedFlag = (flags & PADDED_FLAG) != 0;
+        final var priorityFlag = isPriority();
+        final var paddedFlag = isPadded();
 
         // Get the padLength, if present.
         final var padLength = paddedFlag ? in.readByte() : 0;

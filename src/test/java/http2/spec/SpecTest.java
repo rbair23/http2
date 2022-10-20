@@ -102,7 +102,7 @@ abstract class SpecTest {
         }
 
         public Client submitEmptyHeaders(int streamId) {
-            return submit(new HeadersFrame(false, streamId, new byte[0], 0));
+            return submit(new HeadersFrame(true, false, streamId, new byte[0], 0));
         }
 
         public Client submitEmptyData(int streamId, boolean endOfStream, byte[] data) {
@@ -168,9 +168,8 @@ abstract class SpecTest {
         }
 
         public <T extends Frame> T receiveOrNull(Class<T> clazz) {
-            Frame frame = null;
-            while (frame == null && !receivedFrames.isEmpty()) {
-                frame = receivedFrames.remove();
+            while (!receivedFrames.isEmpty()) {
+                final var frame = receivedFrames.remove();
                 if (clazz.isAssignableFrom(frame.getClass())) {
                     //noinspection unchecked
                     return (T) frame;

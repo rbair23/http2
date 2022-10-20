@@ -29,13 +29,13 @@ public final class ContinuationFrame extends HeadersFrameBase {
     /**
      * Create a new Continuation Frame.
      *
-     * @param endStream Whether this frame represents the end-of-stream.
+     * @param endHeaders Whether this is the end of the headers
      * @param streamId The stream ID. Must be positive.
      * @param fieldBlockFragment The block of data. This is taken as is, and not defensively copied! Not null.
      * @param blockLength The number of bytes in {@code fieldBlockFragment} that hold meaningful data.
      */
-    public ContinuationFrame(boolean endStream, int streamId, byte[] fieldBlockFragment, int blockLength) {
-        super(FrameType.CONTINUATION, endStream, streamId, fieldBlockFragment, blockLength);
+    public ContinuationFrame(boolean endHeaders, int streamId, byte[] fieldBlockFragment, int blockLength) {
+        super(FrameType.CONTINUATION, endHeaders, streamId, fieldBlockFragment, blockLength);
     }
 
     /**

@@ -59,12 +59,12 @@ public final class SettingsFrame extends Frame {
      */
     private byte definedSettings = 0b00_0000;
 
-    private long headerTableSize;
-    private boolean enablePush;
-    private long maxConcurrentStreams;
-    private long initialWindowSize;
-    private int maxFrameSize;
-    private long maxHeaderListSize;
+    private long headerTableSize = DEFAULT_HEADER_TABLE_SIZE;
+    private boolean enablePush = DEFAULT_ENABLE_PUSH;
+    private long maxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
+    private long initialWindowSize = DEFAULT_INITIAL_WINDOW_SIZE;
+    private int maxFrameSize = DEFAULT_MAX_FRAME_SIZE;
+    private long maxHeaderListSize = DEFAULT_MAX_HEADER_LIST_SIZE;
 
     /**
      * Create a new instance.
@@ -239,7 +239,7 @@ public final class SettingsFrame extends Frame {
         //   anything other than 0, then we MUST treat this as a connection error of kind FRAME_SIZE_ERROR.
         final var ack = isAck();
         if (ack && payloadLength != 0) {
-            throw new Http2Exception(Http2ErrorCode.FRAME_SIZE_ERROR, readAheadStreamId(in));
+            throw new Http2Exception(Http2ErrorCode.FRAME_SIZE_ERROR, streamId);
         }
 
         // The settings frame we receive *MAY* be an ACK of the one we sent to the
@@ -267,11 +267,7 @@ public final class SettingsFrame extends Frame {
                         // SPEC: 6.5.2
                         //   The value advertised by an endpoint MUST be between this initial value and
                         //   the maximum allowed frame size
-                        //
-                        // Oof, OKHttp has this value wrong! As per the spec!!!
-                        // Working around for now, but we need to get a patch to OKHttp, so it works correctly.
-                        // How many other clients are wrong? So I added the "+1", but it shouldn't be there.
-                        if (value < INITIAL_FRAME_SIZE || value > MAX_FRAME_SIZE + 1) {
+                        if (value < INITIAL_FRAME_SIZE || value > MAX_FRAME_SIZE) {
                             throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
                         }
 

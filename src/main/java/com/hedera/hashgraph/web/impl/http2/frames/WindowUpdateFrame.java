@@ -29,7 +29,7 @@ public final class WindowUpdateFrame extends Frame {
      * Create a new instance.
      */
     public WindowUpdateFrame() {
-        super(FrameType.HEADERS);
+        super(FrameType.WINDOW_UPDATE);
         setPayloadLength(4);
     }
 
@@ -40,7 +40,7 @@ public final class WindowUpdateFrame extends Frame {
      * @param windowSizeIncrement The window size increment, which must be positive
      */
     public WindowUpdateFrame(int streamId, int windowSizeIncrement) {
-        super(4, FrameType.HEADERS, (byte) 0, streamId);
+        super(4, FrameType.WINDOW_UPDATE, (byte) 0, streamId);
         this.windowSizeIncrement = windowSizeIncrement;
         if (windowSizeIncrement < 1) {
             throw new IllegalArgumentException("The window size increment must be positive");
@@ -65,6 +65,19 @@ public final class WindowUpdateFrame extends Frame {
      */
     public int getWindowSizeIncrement() {
         return windowSizeIncrement;
+    }
+
+    /**
+     * Sets the window size increment
+     * @param windowSizeIncrement The increment, must be non-negative.
+     */
+    public WindowUpdateFrame setWindowSizeIncrement(int windowSizeIncrement) {
+        if (windowSizeIncrement < 0) {
+            throw new IllegalArgumentException("Must be non-negative");
+        }
+
+        this.windowSizeIncrement = windowSizeIncrement;
+        return this;
     }
 
     /**

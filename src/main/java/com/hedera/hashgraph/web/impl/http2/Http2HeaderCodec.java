@@ -38,27 +38,32 @@ public class Http2HeaderCodec {
     }
 
     public void decode(Http2Headers headers, InputStream headerData) throws IOException {
-        headers.clear();
+        if (headers != null) {
+            headers.clear();
+        }
+
         decoder.decode(headerData, (name, value, sensitive) -> {
-            // sensitive is a boolean
-            final var headerName = new String(name);
-            final var headerValue = new String(value);
+            if (headers != null) {
+                // sensitive is a boolean
+                final var headerName = new String(name);
+                final var headerValue = new String(value);
 
-            if (headerName.charAt(0) == ':') {
-                headers.putPseudoHeader(headerName, headerValue);
-            } else {
-                // TODO:
-                    /*
-                        Clients MUST NOT generate a request with a Host header field that differs from the ":authority"
-                        pseudo-header field. A server SHOULD treat a request as malformed if it contains a Host header
-                        field that identifies an entity that differs from the entity in the ":authority" pseudo-header
-                        field. The values of fields need to be normalized to compare them (see Section 6.2 of
-                        [RFC3986]). An origin server can apply any normalization method, whereas other servers MUST
-                        perform scheme-based normalization (see Section 6.2.3 of [RFC3986]) of the two fields.
+                if (headerName.charAt(0) == ':') {
+                    headers.putPseudoHeader(headerName, headerValue);
+                } else {
+                    // TODO:
+                        /*
+                            Clients MUST NOT generate a request with a Host header field that differs from the ":authority"
+                            pseudo-header field. A server SHOULD treat a request as malformed if it contains a Host header
+                            field that identifies an entity that differs from the entity in the ":authority" pseudo-header
+                            field. The values of fields need to be normalized to compare them (see Section 6.2 of
+                            [RFC3986]). An origin server can apply any normalization method, whereas other servers MUST
+                            perform scheme-based normalization (see Section 6.2.3 of [RFC3986]) of the two fields.
 
-                        See the whole section 8.3.1 for more nuance and details
-                     */
-                headers.put(headerName, headerValue);
+                            See the whole section 8.3.1 for more nuance and details
+                         */
+                    headers.put(headerName, headerValue);
+                }
             }
         });
     }

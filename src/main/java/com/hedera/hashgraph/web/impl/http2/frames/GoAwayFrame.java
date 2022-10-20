@@ -65,6 +65,7 @@ public final class GoAwayFrame extends Frame {
      */
     public GoAwayFrame() {
         super(FrameType.GO_AWAY);
+        setPayloadLength(8);
     }
 
     /**
@@ -75,7 +76,7 @@ public final class GoAwayFrame extends Frame {
      * @param errorCode The error code associated with this frame
      */
     public GoAwayFrame(final int streamId, final int lastStreamId, final Http2ErrorCode errorCode) {
-        super(0, FrameType.GO_AWAY, (byte) 0, streamId);
+        super(8, FrameType.GO_AWAY, (byte) 0, streamId);
         this.lastStreamId = lastStreamId;
         this.errorCode = errorCode;
     }

@@ -1,6 +1,7 @@
 package http2.spec;
 
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
+import com.hedera.hashgraph.web.impl.http2.frames.FrameType;
 import com.hedera.hashgraph.web.impl.http2.frames.GoAwayFrame;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -92,7 +93,7 @@ class StreamsSpecTest extends SpecTest {
     void headerWithStreamId0Fails() throws IOException {
         // Initializes the connection.
         client.initializeConnection();
-        client.submitEmptyHeaders(0).sendAndReceive();
+        client.submit(FrameType.HEADERS, (byte) 0b0000_0100, 0, null).sendAndReceive();
         final var goAway = client.receive(GoAwayFrame.class);
         assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
     }
@@ -115,25 +116,6 @@ class StreamsSpecTest extends SpecTest {
         client.submitEmptyHeaders(11).sendAndReceive();
         assertFalse(client.framesReceived());
         client.submitEmptyHeaders(3).sendAndReceive();
-        final var goAway = client.receive(GoAwayFrame.class);
-        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
-    }
-
-    /**
-     * SPEC: 5.1.1 Stream Identifiers.
-     *
-     * <p>Stream identifiers cannot be reused. Long-lived connections can result in an endpoint exhausting
-     * the available range of stream identifiers. A client that is unable to establish a new stream identifier
-     * can establish a new connection for new streams. A server that is unable to establish a new stream identifier
-     * can sendAndReceive a GOAWAY frame so that the client is forced to open a new connection for new streams.
-     */
-    @Test
-    void headerWithMaxStreamIdFails() throws IOException {
-        // Initializes the connection.
-        client.initializeConnection();
-        client.submitEmptyHeaders(Integer.MAX_VALUE - 2).sendAndReceive();
-        assertFalse(client.framesReceived());
-        client.submitEmptyHeaders(Integer.MAX_VALUE).sendAndReceive();
         final var goAway = client.receive(GoAwayFrame.class);
         assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
     }

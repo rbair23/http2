@@ -19,29 +19,6 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Section 3.4. HTTP/2 Connection Preface")
 class ConnectionSpecTest extends SpecTest {
 
-    @Test
-    @Tag(HAPPY_PATH)
-    @DisplayName("Server Acknowledges Client Settings Receipt")
-    void happyPath() throws IOException {
-        // Write a client settings frame and send it to the server and get responses
-        client.submitSettings(new Settings()).sendAndReceive();
-
-        // On the client, read the settings frame from the server and make sure we actually
-        // got settings from the server (TEST_... settings are set on the server by the SpecTest)
-        final var serverSettingsFrame = client.receive(SettingsFrame.class);
-        assertEquals(TEST_MAX_CONCURRENT_STREAMS_PER_CONNECTION, serverSettingsFrame.getMaxConcurrentStreams());
-
-        // On the client we should also have received the ACK settings object
-        final var ackSettingsFrame = client.receive(SettingsFrame.class);
-        assertTrue(ackSettingsFrame.isAck());
-
-        // Send an ACK to the server that we received its settings
-        client.submitSettingsAck(serverSettingsFrame).sendAndReceive();
-
-        // We MUST NOT receive another ACK from the server -- they shouldn't ACK the client ACK!!
-        assertFalse(client.framesReceived());
-    }
-
     /**
      * SPEC: 3.4<br>
      * This sequence MUST be followed by a SETTINGS frame (Section 6.5), which MAY be empty.
@@ -129,7 +106,7 @@ class ConnectionSpecTest extends SpecTest {
         client.submitPing(784388230L);
 
         // Send some stuff
-        for (int i = 1; i <= 10; i++) {
+        for (int i = 1; i <= 20; i+=2) {
             // Send a header
             client.submitEmptyHeaders(i);
 
@@ -171,5 +148,28 @@ class ConnectionSpecTest extends SpecTest {
         // We should have received a PROTOCOL_ERROR
         final var goAway = client.receive(GoAwayFrame.class);
         assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
+    }
+
+    @Test
+    @Tag(HAPPY_PATH)
+    @DisplayName("Do Not Receive an ACK Storm")
+    void noAckStorms() throws IOException {
+        // Write a client settings frame and send it to the server and get responses
+        client.submitSettings(new Settings()).sendAndReceive();
+
+        // On the client, read the settings frame from the server and make sure we actually
+        // got settings from the server (TEST_... settings are set on the server by the SpecTest)
+        final var serverSettingsFrame = client.receive(SettingsFrame.class);
+        assertEquals(TEST_MAX_CONCURRENT_STREAMS_PER_CONNECTION, serverSettingsFrame.getMaxConcurrentStreams());
+
+        // On the client we should also have received the ACK settings object
+        final var ackSettingsFrame = client.receive(SettingsFrame.class);
+        assertTrue(ackSettingsFrame.isAck());
+
+        // Send an ACK to the server that we received its settings
+        client.submitSettingsAck(serverSettingsFrame).sendAndReceive();
+
+        // We MUST NOT receive another ACK from the server -- they shouldn't ACK the client ACK!!
+        assertFalse(client.framesReceived());
     }
 }

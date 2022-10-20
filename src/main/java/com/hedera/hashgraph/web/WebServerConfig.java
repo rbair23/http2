@@ -23,7 +23,9 @@ public record WebServerConfig(
         int maxRequestSize,
         int maxConcurrentStreamsPerConnection,
         int maxHeaderSize,
-        int outputBufferSize) {
+        int outputBufferSize,
+        int patienceThreshold,
+        int maxHeaderTableSize) {
     /**
      * Defines the default value for the backlog.
      * <p>
@@ -45,6 +47,8 @@ public record WebServerConfig(
     public static final int DEFAULT_MAX_CONCURRENT_STREAMS_PER_CONNECTION = 10;
     public static final int DEFAULT_MAX_HEADER_SIZE = 1024;
     public static final int DEFAULT_OUTPUT_BUFFER_SIZE = 16*1024;
+    public static final int DEFAULT_PATIENCE_THRESHOLD = 20;
+    public static final int DEFAULT_MAX_HEADER_TABLE_SIZE = 8192;
 
     /*
         Additional configuration we may want
@@ -92,7 +96,9 @@ public record WebServerConfig(
                 DEFAULT_MAX_REQUEST_SIZE,
                 DEFAULT_MAX_CONCURRENT_STREAMS_PER_CONNECTION,
                 DEFAULT_MAX_HEADER_SIZE,
-                DEFAULT_OUTPUT_BUFFER_SIZE);
+                DEFAULT_OUTPUT_BUFFER_SIZE,
+                DEFAULT_PATIENCE_THRESHOLD,
+                DEFAULT_MAX_HEADER_TABLE_SIZE);
     }
 
     public static final class Builder {
@@ -107,6 +113,8 @@ public record WebServerConfig(
         private int outputBufferSize = DEFAULT_OUTPUT_BUFFER_SIZE;
         private ExecutorService executor;
         private boolean noDelay;
+        private int patienceThreshold = DEFAULT_PATIENCE_THRESHOLD;
+        private int maxHeaderTableSize = DEFAULT_MAX_HEADER_TABLE_SIZE;
 
         public Builder host(String host) {
             this.host = Objects.requireNonNull(host);
@@ -177,6 +185,16 @@ public record WebServerConfig(
             return this;
         }
 
+        public Builder maxHeaderTableSize(int value) {
+            this.maxHeaderTableSize = value;
+            return this;
+        }
+
+        public Builder patienceThreshold(int value) {
+            this.patienceThreshold = patienceThreshold;
+            return this;
+        }
+
         public Builder executor(ExecutorService e) {
             this.executor = e;
             return this;
@@ -201,7 +219,8 @@ public record WebServerConfig(
             final var a = addr == null ? new InetSocketAddress(host, port) : addr;
             final var e = executor == null ? Executors.newSingleThreadExecutor() : executor;
             return new WebServerConfig(a, e, backlog, noDelay, maxIdleConnections, maxRequestSize,
-                    maxConcurrentStreamsPerConnection, maxHeaderSize, outputBufferSize);
+                    maxConcurrentStreamsPerConnection, maxHeaderSize, outputBufferSize,
+                    patienceThreshold, maxHeaderTableSize);
         }
     }
 }

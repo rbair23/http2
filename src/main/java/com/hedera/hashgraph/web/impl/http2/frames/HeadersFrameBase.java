@@ -35,21 +35,28 @@ public abstract class HeadersFrameBase extends Frame {
      * Create a new Header or Continuation Frame.
      *
      * @param frameType The type of frame. not null.
-     * @param endStream Whether this frame represents the end-of-stream.
+     * @param endHeaders Whether this is the end of the headers
      * @param streamId The stream ID. Must be positive.
      * @param fieldBlockFragment The block of data. This is taken as is, and not defensively copied! Not null.
      * @param blockLength The number of bytes in {@link #fieldBlockFragment} that hold meaningful data.
      */
-    protected HeadersFrameBase(FrameType frameType, boolean endStream, int streamId, byte[] fieldBlockFragment, int blockLength) {
-        super(blockLength, frameType, (byte) (endStream ? 1 : 0), streamId);
-        this.fieldBlockFragment = Objects.requireNonNull(fieldBlockFragment);
-        this.blockLength = blockLength;
+    protected HeadersFrameBase(
+            FrameType frameType,
+            boolean endHeaders,
+            int streamId,
+            byte[] fieldBlockFragment,
+            int blockLength) {
+        super(blockLength, frameType, (byte) 0, streamId);
         if (fieldBlockFragment.length < blockLength) {
             throw new IllegalArgumentException("The blockLength cannot exceed the fieldBlockFragment.length");
         }
         if (streamId < 1) {
             throw new IllegalArgumentException("The stream id cannot be < 1");
         }
+
+        this.fieldBlockFragment = Objects.requireNonNull(fieldBlockFragment);
+        this.blockLength = blockLength;
+        setEndHeaders(endHeaders);
     }
 
     /**
@@ -82,10 +89,10 @@ public abstract class HeadersFrameBase extends Frame {
     /**
      * Specifies whether this frame is the last frame of the headers.
      *
-     * @param endStream Whether this frame is the last frame of the headers.
+     * @param endHeaders Whether this frame is the last frame of the headers.
      */
-    public final void setEndHeaders(boolean endStream) {
-        super.setSixthFlag(endStream);
+    public final void setEndHeaders(boolean endHeaders) {
+        super.setSixthFlag(endHeaders);
     }
 
     /**

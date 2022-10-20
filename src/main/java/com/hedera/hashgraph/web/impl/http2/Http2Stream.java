@@ -224,6 +224,12 @@ public final class Http2Stream extends RequestContext {
 
     @Override
     public void close() {
+        // TODO We need to make sure that if the stream happens to be in the middle of handling
+        //      on another thread and comes back from there, that it doesn't ever do anything.
+        //      It may be that the Http2Stream is reused, and by the time the handler
+        //      comes back, it finds that the Http2Stream has been reused and in a
+        //      half-closed state ready for a response! We need to cancel that job and make
+        //      sure it never comes back (back to the Future!!)
         connection.close(streamId);
         streamId = -1;
         connection = null;
@@ -246,7 +252,7 @@ public final class Http2Stream extends RequestContext {
         // TODO If I am already open, does the same headers frame cause me to go half-closed?
         // The same HEADERS frame can also cause a stream to immediately become "half-closed".
 
-        if (headersFrame.isEndHeaders()) {
+        if (headersFrame.isEndHeaders() && headersFrame.getBlockLength() > 0) {
             // I have all the bytes I will need... so I can go and decode them
             try {
                 final var codec = connection.getHeaderCodec();
@@ -260,7 +266,7 @@ public final class Http2Stream extends RequestContext {
                 throw new Http2Exception(Http2ErrorCode.COMPRESSION_ERROR, streamId);
             }
         } else {
-            // We didn't read the entire header so now it is continuation time
+            // We didn't read the entire header, so now it is continuation time
             headerContinuation = true;
         }
 

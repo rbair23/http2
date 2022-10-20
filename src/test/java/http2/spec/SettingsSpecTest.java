@@ -101,9 +101,9 @@ class SettingsSpecTest extends SpecTest {
         // Write a client settings frame with a length that is not a multiple of 6
         client.submit(FrameType.SETTINGS, (byte) 0x0, 0, new byte[4]).sendAndReceive();
 
-        // We MUST get a PROTOCOL_ERROR
+        // We MUST get a FRAME_SIZE_ERROR
         final var goAway = client.receive(GoAwayFrame.class);
-        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
+        assertEquals(Http2ErrorCode.FRAME_SIZE_ERROR, goAway.getErrorCode());
     }
 
     /**
@@ -125,13 +125,10 @@ class SettingsSpecTest extends SpecTest {
         // ID can be anything greater than 6 and the value any random int
         buf.write16BigInteger(100);
         buf.write32BitInteger(randomInt());
-        // Now get the array from the buffer and replace the "length" to include a 7th
-        // setting
-        final var arr = buf.getBuffer().array();
-        arr[2] = 7 * 6;
 
         // Write the client settings including the extra unknown setting
-        client.submit(FrameType.SETTINGS, (byte) 0x0, 0, arr).sendAndReceive();
+        client.submit(FrameType.SETTINGS, (byte) 0x0, 0, buf.getBuffer().array(), 0, 7 * 6)
+                .sendAndReceive();
 
         // We MUST NOT get an error of any kind. The implementation is forward compatible.
         final var goAway = client.receiveOrNull(GoAwayFrame.class);
