@@ -48,6 +48,8 @@ public class Http2HeaderCodec {
                 final var headerName = new String(name);
                 final var headerValue = new String(value);
 
+                System.out.println("Decoded: " + headerName + " = " + headerValue);
+
                 if (headerName.charAt(0) == ':') {
                     headers.putPseudoHeader(headerName, headerValue);
                 } else {

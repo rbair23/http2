@@ -145,15 +145,16 @@ public class Http1ConnectionContext extends ConnectionContext {
                             try {
                                 // we found a space, so read between mark and current position as string
                                 final int bytesRead = inputBuffer.resetToMark();
-                                requestContext.setVersion(inputBuffer.readVersion());
+                                final var version = inputBuffer.readVersion();
+
                                 // check for unknown version
-                                if (requestContext.getVersion() == null) {
+                                if (version == null) {
                                     return respondWithError(StatusCode.HTTP_VERSION_NOT_SUPPORTED_505);
                                 }
                                 // skip over the new line
                                 inputBuffer.skip(2);
                                 // handle versions
-                                switch (requestContext.getVersion()) {
+                                switch (version) {
                                     case HTTP_1 -> {
                                         return respondWithError(StatusCode.UPGRADE_REQUIRED_426,
                                                 new WebHeadersImpl()

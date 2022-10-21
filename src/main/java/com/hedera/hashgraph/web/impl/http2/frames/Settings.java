@@ -28,7 +28,7 @@ public final class Settings {
      * SETTINGS_MAX_FRAME_SIZE setting. This setting can have any value between 2^14 (16,384) and (2^24)-1
      * (16,777,215) octets, inclusive.
      */
-    public static final int MAX_FRAME_SIZE = (1 << 24) - 1; // TODO OK HTTP incorrectly sends 1 << 24, not 1 << 24 - 1!!
+    public static final int MAX_FRAME_SIZE = (1 << 24);// - 1; // TODO OK HTTP incorrectly sends 1 << 24, not 1 << 24 - 1!!
 
     /**
      * SPEC: 4.2 Frame Size

@@ -91,7 +91,7 @@ public abstract class Frame {
      * @return The total length of the frame in bytes. This will always be a value 9 or greater.
      */
     public final int getFrameLength() {
-        return 9 + getPayloadLength();
+        return FRAME_HEADER_SIZE + getPayloadLength();
     }
 
     /**

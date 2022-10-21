@@ -11,8 +11,8 @@ import java.nio.channels.WritableByteChannel;
  * An OutputStream around a ByteBuffer that is reusable and has helpful write methods.
  */
 public class OutputBuffer extends OutputStream {
-    private final Runnable onCloseCallback;
-    private final Runnable onDataFullCallback;
+    private Runnable onCloseCallback;
+    private Runnable onDataFullCallback;
 
     // The buffer.position() marks the next position to write into the buffer,
     // while buffer.limit() marks the last possible byte to fill, so the limit
@@ -20,13 +20,7 @@ public class OutputBuffer extends OutputStream {
     private final ByteBuffer buffer;
 
     public OutputBuffer(int size) {
-        this(size, null, null);
-    }
-
-    public OutputBuffer(int size, Runnable onCloseCallback, Runnable onDataFullCallback) {
         this.buffer = ByteBuffer.allocate(size);
-        this.onCloseCallback = onCloseCallback;
-        this.onDataFullCallback = onDataFullCallback;
     }
 
     /**
@@ -49,6 +43,14 @@ public class OutputBuffer extends OutputStream {
         if (buffer.remaining() < numBytes) {
             dataFull();
         }
+    }
+
+    public void setOnCloseCallback(Runnable onCloseCallback) {
+        this.onCloseCallback = onCloseCallback;
+    }
+
+    public void setOnDataFullCallback(Runnable onDataFullCallback) {
+        this.onDataFullCallback = onDataFullCallback;
     }
 
     public OutputBuffer reset() {

@@ -408,6 +408,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             // Make sure we have enough data to handle the entire frame.
             if (inputBuffer.available(Frame.FRAME_HEADER_SIZE + length)) {
                 final var type = FrameType.valueOf(inputBuffer.peekByte(3));
+                System.out.println("HANDLING " + type);
                 switch (type) {
                     // SPEC: 6.1 DATA
                     case DATA -> handleData();
@@ -594,7 +595,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // OK, so we have a new stream. That's great! Let's create a new Http2RequestContext to
         // handle it. When it is closed, we need to remove it from the map.
         final var stream = contextReuseManager.checkoutHttp2RequestContext();
-        stream.init(this);
+        stream.init(this, streamId);
         highestStreamId = streamId;
 
         // Put it in the map
@@ -900,6 +901,11 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         streams.remove(streamId);
     }
 
+    @Override
+    public OutputBuffer getOutputBuffer() {
+        return contextReuseManager.checkoutOutputBuffer();
+    }
+
     /**
      * {@inheritDoc}
      */
@@ -915,7 +921,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         final var effectiveHeaderTableSize = Math.min(clientSettings.getHeaderTableSize(), maxHeaderTableSize);
         final var encoder = new Encoder((int) clientSettings.getMaxHeaderListSize());
         final var decoder = new Decoder(
-                (int) clientSettings.getMaxHeaderListSize(),
+                256,
                 (int) effectiveHeaderTableSize);
 
         codec = new Http2HeaderCodec(encoder, decoder);

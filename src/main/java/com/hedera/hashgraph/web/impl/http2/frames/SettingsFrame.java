@@ -32,21 +32,25 @@ import static com.hedera.hashgraph.web.impl.http2.frames.Settings.*;
  */
 public final class SettingsFrame extends Frame {
     private enum Setting {
-        SETTINGS_HEADER_TABLE_SIZE,
-        SETTINGS_ENABLE_PUSH,
-        SETTINGS_MAX_CONCURRENT_STREAMS,
-        SETTINGS_INITIAL_WINDOW_SIZE,
-        SETTINGS_MAX_FRAME_SIZE,
-        SETTINGS_MAX_HEADER_LIST_SIZE;
+        SETTINGS_HEADER_TABLE_SIZE(),
+        SETTINGS_ENABLE_PUSH(),
+        SETTINGS_MAX_CONCURRENT_STREAMS(),
+        SETTINGS_INITIAL_WINDOW_SIZE(),
+        SETTINGS_MAX_FRAME_SIZE(),
+        SETTINGS_MAX_HEADER_LIST_SIZE();
 
-        private static Setting valueOf(int ordinal) {
-            return switch (ordinal) {
-                case 0 -> SETTINGS_HEADER_TABLE_SIZE;
-                case 1 -> SETTINGS_ENABLE_PUSH;
-                case 2 -> SETTINGS_MAX_CONCURRENT_STREAMS;
-                case 3 -> SETTINGS_INITIAL_WINDOW_SIZE;
-                case 4 -> SETTINGS_MAX_FRAME_SIZE;
-                case 5 -> SETTINGS_MAX_HEADER_LIST_SIZE;
+        public int id() {
+            return ordinal() + 1;
+        }
+
+        private static Setting valueOf(int id) {
+            return switch (id) {
+                case 1 -> SETTINGS_HEADER_TABLE_SIZE;
+                case 2 -> SETTINGS_ENABLE_PUSH;
+                case 3 -> SETTINGS_MAX_CONCURRENT_STREAMS;
+                case 4 -> SETTINGS_INITIAL_WINDOW_SIZE;
+                case 5 -> SETTINGS_MAX_FRAME_SIZE;
+                case 6 -> SETTINGS_MAX_HEADER_LIST_SIZE;
                 default -> null;
             };
         }
@@ -252,8 +256,8 @@ public final class SettingsFrame extends Frame {
         // Read off all the settings. Each Setting has a 2 byte identifier and a 4 byte value
         final var numSettings = payloadLength / 6;
         for (int i = 0; i < numSettings; i++) {
-            final var settingOrdinal = in.read16BitInteger();
-            final var setting = Setting.valueOf(settingOrdinal);
+            final var settingId = in.read16BitInteger();
+            final var setting = Setting.valueOf(settingId);
             final var value = in.read32BitUnsignedInteger();
 
             // SPEC: 6.5.2
@@ -320,32 +324,32 @@ public final class SettingsFrame extends Frame {
         super.write(out);
 
         if (isHeaderTableSizeSet()) {
-            out.write16BigInteger(Setting.SETTINGS_HEADER_TABLE_SIZE.ordinal());
+            out.write16BigInteger(Setting.SETTINGS_HEADER_TABLE_SIZE.id());
             out.write32BitUnsignedInteger(getHeaderTableSize());
         }
 
         if (isEnablePushSet()) {
-            out.write16BigInteger(Setting.SETTINGS_ENABLE_PUSH.ordinal());
+            out.write16BigInteger(Setting.SETTINGS_ENABLE_PUSH.id());
             out.write32BitUnsignedInteger(isEnablePush() ? 1 : 0);
         }
 
         if (isMaxConcurrentStreamsSet()) {
-            out.write16BigInteger(Setting.SETTINGS_MAX_CONCURRENT_STREAMS.ordinal());
+            out.write16BigInteger(Setting.SETTINGS_MAX_CONCURRENT_STREAMS.id());
             out.write32BitUnsignedInteger(getMaxConcurrentStreams());
         }
 
         if (isInitialWindowSizeSet()) {
-            out.write16BigInteger(Setting.SETTINGS_INITIAL_WINDOW_SIZE.ordinal());
+            out.write16BigInteger(Setting.SETTINGS_INITIAL_WINDOW_SIZE.id());
             out.write32BitUnsignedInteger(getInitialWindowSize());
         }
 
         if (isMaxFrameSizeSet()) {
-            out.write16BigInteger(Setting.SETTINGS_MAX_FRAME_SIZE.ordinal());
+            out.write16BigInteger(Setting.SETTINGS_MAX_FRAME_SIZE.id());
             out.write32BitUnsignedInteger(getMaxFrameSize());
         }
 
         if (isMaxHeaderListSizeSet()) {
-            out.write16BigInteger(Setting.SETTINGS_MAX_HEADER_LIST_SIZE.ordinal());
+            out.write16BigInteger(Setting.SETTINGS_MAX_HEADER_LIST_SIZE.id());
             out.write32BitUnsignedInteger(getMaxHeaderListSize());
         }
     }

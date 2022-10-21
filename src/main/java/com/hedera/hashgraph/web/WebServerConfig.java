@@ -217,7 +217,7 @@ public record WebServerConfig(
 
         public WebServerConfig build() {
             final var a = addr == null ? new InetSocketAddress(host, port) : addr;
-            final var e = executor == null ? Executors.newSingleThreadExecutor() : executor;
+            final var e = executor == null ? Executors.newCachedThreadPool() : executor;
             return new WebServerConfig(a, e, backlog, noDelay, maxIdleConnections, maxRequestSize,
                     maxConcurrentStreamsPerConnection, maxHeaderSize, outputBufferSize,
                     patienceThreshold, maxHeaderTableSize);

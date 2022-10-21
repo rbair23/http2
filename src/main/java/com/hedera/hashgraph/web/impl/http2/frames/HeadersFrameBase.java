@@ -77,6 +77,12 @@ public abstract class HeadersFrameBase extends Frame {
         return blockLength;
     }
 
+    public HeadersFrameBase setBlockLength(int blockLength) {
+        this.blockLength = blockLength;
+        super.setPayloadLength(blockLength);
+        return this;
+    }
+
     /**
      * Gets whether this is the very last frame of the headers.
      *
@@ -91,8 +97,9 @@ public abstract class HeadersFrameBase extends Frame {
      *
      * @param endHeaders Whether this frame is the last frame of the headers.
      */
-    public final void setEndHeaders(boolean endHeaders) {
+    public HeadersFrameBase setEndHeaders(boolean endHeaders) {
         super.setSixthFlag(endHeaders);
+        return this;
     }
 
     /**

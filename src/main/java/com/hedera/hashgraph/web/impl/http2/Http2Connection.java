@@ -4,6 +4,7 @@ import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 public interface Http2Connection {
     void close(int streamId);
+
     Http2HeaderCodec getHeaderCodec();
 
     /**
@@ -15,4 +16,6 @@ public interface Http2Connection {
      * @param buffer The un-flipped buffer to write
      */
     void sendOutput(OutputBuffer buffer);
+
+    OutputBuffer getOutputBuffer();
 }

@@ -31,7 +31,7 @@ public final class DataFrame extends Frame {
      * actual frame data (again, to avoid object churn we don't create new arrays
      * every time but use this as a buffer).
      */
-    private byte[] data = new byte[1024];
+    private byte[] data;
 
     /**
      * The number of significant bytes in {@link #data}.
@@ -43,6 +43,15 @@ public final class DataFrame extends Frame {
      */
     public DataFrame() {
         super(FrameType.DATA);
+        data = new byte[1024];
+    }
+
+    /**
+     * Create a new Data Frame.
+     */
+    public DataFrame(int bufferSize) {
+        super(FrameType.DATA);
+        data = new byte[bufferSize];
     }
 
     /**

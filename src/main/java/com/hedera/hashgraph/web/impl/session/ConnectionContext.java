@@ -2,6 +2,7 @@ package com.hedera.hashgraph.web.impl.session;
 
 import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.impl.ChannelManager;
+import com.hedera.hashgraph.web.impl.http2.frames.Settings;
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
@@ -144,7 +145,7 @@ public abstract class ConnectionContext implements AutoCloseable {
             return HandleResponse.CLOSE_CONNECTION;
         }
 
-        return HandleResponse.ALL_DATA_HANDLED;
+        return closed ? HandleResponse.CLOSE_CONNECTION : HandleResponse.ALL_DATA_HANDLED;
     }
 
     /**

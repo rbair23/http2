@@ -39,7 +39,7 @@ class Http1RequestContext extends RequestContext {
      */
     protected Http1RequestContext(Dispatcher dispatcher, Supplier<OutputBuffer> checkoutOutputBuffer, 
                                   Consumer<OutputBuffer> sendResponse) {
-        super(dispatcher);
+        super(dispatcher, HttpVersion.HTTP_1);
         this.checkoutOutputBuffer = checkoutOutputBuffer;
         this.sendResponse = sendResponse;
     }
@@ -74,11 +74,6 @@ class Http1RequestContext extends RequestContext {
     public void setPath(String path) {
         this.path = path;
     }
-
-    public void setVersion(HttpVersion version) {
-        this.version = version;
-    }
-
 
     void respond(StatusCode statusCode, WebHeaders responseHeaders, String plainTextBody)
             throws ResponseAlreadySentException {

@@ -7,13 +7,16 @@ import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
 import com.hedera.hashgraph.web.impl.session.RequestContext;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import com.hedera.hashgraph.web.impl.util.ReusableByteArrayInputStream;
+import com.hedera.hashgraph.web.impl.util.ReusableByteArrayOutputStream;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.util.Objects;
 
-// TODO I'm being less rigorous on my buffer sizes than I should be -- headers can fill up a buffer of
-// size N, and then when decompressed they can fill up another buffer of size N -- could overflow.
+/**
+ * Represents the {@link WebRequest} for an HTTP/2 stream.
+ */
 public final class Http2Stream extends RequestContext {
     /**
      * The different states supported by the HTTP/2.0 Stream States state machine.
@@ -53,9 +56,9 @@ public final class Http2Stream extends RequestContext {
     }
 
     /**
-     * The HTTP/2.0 stream ID associated with this request
+     * The HTTP/2 stream ID associated with this request
      */
-    private int streamId;
+    private int streamId = -1;
 
     /**
      * The current state of this stream.
@@ -63,32 +66,9 @@ public final class Http2Stream extends RequestContext {
     private State state = State.IDLE;
 
     /**
-     * Keeps track of whether we have finished processing the headers. True when we see the first
-     * header with END_HEADERS false, and stays true until we see a CONTINUATION frame with
-     * END_HEADERS true;
-     */
-    private boolean headerContinuation = false;
-
-    /**
-     * A buffer into which we copy the request data as it comes in. At first, we place the decoded header
-     * data into this buffer, and then after turning that decoded header data into a {@link #requestHeaders}
-     * field, we initialize the buffer and use it for storing the request body data.
-     */
-    private final byte[] requestBuffer;
-
-    /**
-     * The index of the end of data in the {@link #requestBuffer}.
-     */
-    private int requestBufferLength = 0;
-
-    /**
-     * A reusable {@link java.io.InputStream} that we use for passing to the handler the
-     * request body stream.
-     */
-    private final ReusableByteArrayInputStream requestBodyInputStream;
-
-    /**
-     * Some data associated with the connection that the request needs.
+     * A reference to the {@link Http2Connection} that created this stream. It contains some API
+     * that the stream needs, for example, to decode and encode header data, or to submit data to
+     * be sent to the client.
      */
     private Http2Connection connection;
 
@@ -99,24 +79,27 @@ public final class Http2Stream extends RequestContext {
     private final Http2Headers requestHeaders = new Http2Headers();
 
     /**
-     * This buffer holds the response data. At first, it is filled with the header frame, until that is sent,
-     * and then with a data frame and one or more continuation frames until they are ready to be sent,
-     * or any other frames we need to prepare to send.
+     * A reusable {@link java.io.InputStream} that we use for passing to the handler the
+     * request body stream.
+     *
+     * <p>At first, we place the decoded header data into this buffer, and then after decoding the headers
+     * and storing them in {@link #requestHeaders}, we reset the stream and use it for storing the request
+     * body data.
      */
-    private final OutputBuffer responseBuffer = new OutputBuffer(
-            Settings.INITIAL_FRAME_SIZE,
-            this::sendRequestOutputBufferContentsAsLastFrame, // when user closes stream send data as frame
-            this::sendRequestOutputBufferContentsAsFrame);  // if the user write too much data then send in multiple frames
+    private final ReusableByteArrayInputStream requestBodyInputStream;
 
     /**
-     * A {@link HeadersFrame} that can be reused for responding with header data
+     * The object we return to the user to collect the web response.
+     */
+    private final Http2WebResponse webResponse;
+
+    private final OutputBufferOutputStream responseBuffer;
+
+    /**
+     * A {@link HeadersFrame} that can be reused for responding with header data. The byte[] within
+     * the headers frame is large enough to hold the compressed headers.
      */
     private final HeadersFrame responseHeadersFrame = new HeadersFrame();
-
-    /**
-     * A {@link DataFrame} that can be reused for responding with data
-     */
-    private final DataFrame responseDataFrame = new DataFrame();
 
     /**
      * A {@link RstStreamFrame} that can be reused for sending reset frame data
@@ -132,11 +115,11 @@ public final class Http2Stream extends RequestContext {
      * @param dispatcher The {@link Dispatcher} to use. Must not be null.
      */
     public Http2Stream(final Dispatcher dispatcher) {
-        super(dispatcher);
-        this.version = HttpVersion.HTTP_2;
+        super(dispatcher, HttpVersion.HTTP_2);
 
-        this.requestBuffer = new byte[Settings.INITIAL_FRAME_SIZE];
-        this.requestBodyInputStream = new ReusableByteArrayInputStream(requestBuffer);
+        this.requestBodyInputStream = new ReusableByteArrayInputStream(new byte[Settings.INITIAL_FRAME_SIZE]);
+        this.responseBuffer = new OutputBufferOutputStream();
+        this.webResponse = new Http2WebResponse();
     }
 
     /**
@@ -144,86 +127,50 @@ public final class Http2Stream extends RequestContext {
      *
      * @param connection An implementation of {@link Http2Connection}
      */
-    public void init(Http2Connection connection) {
+    public void init(final Http2Connection connection, int streamId) {
         super.reset();
         this.state = State.IDLE;
-        this.streamId = -1;
+        this.streamId = streamId;
         this.connection = Objects.requireNonNull(connection);
-        this.responseBuffer.reset();
-        this.requestBufferLength = 0;
         this.requestBodyInputStream.reuse(0);
         this.requestHeaders.clear();
-    }
+        this.responseBuffer.reset();
+        this.webResponse.reset(responseBuffer);
 
-    private void sendRequestOutputBufferContentsAsLastFrame() {
-        try {
-            // Write the body data
-            responseBuffer.position(0);
-            responseBuffer.write24BitInteger(responseBuffer.size() - Frame.FRAME_HEADER_SIZE);
-            responseBuffer.position(4);
-            responseBuffer.writeByte((byte) 0x1); // END OF STREAM
-            sendFrame();
-        } catch (IOException fatalToConnection) {
-            fatalToConnection.printStackTrace();
-        }
-    }
-
-    private void sendRequestOutputBufferContentsAsFrame() {
-        // THIS CALLBACK HAPPENS WHEN WE FILL UP BECAUSE WE HAD TOO MUCH DATA
-//        try {
-//            // Create Frame Header
-//            responseHeaderBuffer.init();
-//            DataFrame.writeHeader(responseHeaderBuffer, streamId, responseBuffer.size());
-//            sendFrame();
-//        } catch (IOException fatalToConnection) {
-//            fatalToConnection.printStackTrace();
-//        }
-    }
-
-    private void sendFrame() throws IOException {
-        connection.sendOutput(responseBuffer);
+        // TODO I should reset the frames, just to be sure no data is being reused...
     }
 
     // =================================================================================================================
     // WebRequest Methods
 
-//    @Override
-//    public OutputStream startResponse(final StatusCode statusCode, final WebHeaders responseHeaders) throws ResponseAlreadySentException {
-//        try {
-//            sendHeaders(statusCode, responseHeaders, false);
-//        } catch (IOException fatalToConnection) {
-//            fatalToConnection.printStackTrace();
-//        }
-//
-//        // Now we just return the response buffer, which is itself an OutputStream. The handler will write
-//        // whatever body bytes it wants into this stream. When it fills up, we get a callback, and can then
-//        // send the frame and init for another. When it closes, we get a callback and can send the frame.
-//        responseBuffer.reset();
-//        DataFrame.writeHeader(responseBuffer, streamId, 0);
-//        return responseBuffer;
-//    }
-
-//    @Override
-//    public void respond(final StatusCode statusCode, final WebHeaders responseHeaders) throws ResponseAlreadySentException {
-//        try {
-//            sendHeaders(statusCode, responseHeaders, true);
-//        } catch (IOException fatalToConnection) {
-//            fatalToConnection.printStackTrace();
-//        }
-//    }
-
     @Override
     public WebHeaders getRequestHeaders() {
-        return null;
+        return requestHeaders;
     }
 
     @Override
     public WebResponse getResponse() throws ResponseAlreadySentException {
-        return null;
+        return webResponse;
     }
 
     @Override
     public void close() {
+        // TODO This is wrong. So, so, wrong.
+        // If we are closed while in the HALF_CLOSED state, then maybe(???) this means we handled things
+        // successfully (it really doesn't mean that, we need another signal).
+        if (state == State.HALF_CLOSED) {
+            try {
+                final var responseHeaders = (Http2Headers) webResponse.getHeaders();
+                final var endOfStream = responseBuffer.currentBuffer.size() == 0;
+                sendHeadersFrame(responseHeaders, endOfStream);
+                responseBuffer.sendRequestOutputBufferContentsAsLastFrame();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        sendRstStreamFrame();
+
         // TODO We need to make sure that if the stream happens to be in the middle of handling
         //      on another thread and comes back from there, that it doesn't ever do anything.
         //      It may be that the Http2Stream is reused, and by the time the handler
@@ -256,18 +203,16 @@ public final class Http2Stream extends RequestContext {
             // I have all the bytes I will need... so I can go and decode them
             try {
                 final var codec = connection.getHeaderCodec();
-                codec.decode(requestHeaders, new ByteArrayInputStream(headersFrame.getFieldBlockFragment()));
+                codec.decode(requestHeaders, new ByteArrayInputStream(headersFrame.getFieldBlockFragment(), 0, headersFrame.getBlockLength()));
                 method = requestHeaders.getMethod();
                 path = requestHeaders.getPath();
             } catch (IOException ex) {
                 // SPEC: 4.3 Field Section Compression and Decompression
                 // A decoding error in a field block MUST be treated as a connection error (Section 5.4.1) of type
                 // COMPRESSION_ERROR.
+                ex.printStackTrace();
                 throw new Http2Exception(Http2ErrorCode.COMPRESSION_ERROR, streamId);
             }
-        } else {
-            // We didn't read the entire header, so now it is continuation time
-            headerContinuation = true;
         }
 
         // It is possible the entire request was just a HEADERS frame, in which case
@@ -352,14 +297,14 @@ public final class Http2Stream extends RequestContext {
             throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
         }
 
-        if (!headerContinuation) {
-            // TODO throw exception because we should have seen a HEADERS frame or a continuation frame
-            //      without END_HEADERS to be here
-        }
-
-        if (continuationFrame.isEndHeaders()) {
-            headerContinuation = false;
-        }
+//        if (!headerContinuation) {
+//            // TODO throw exception because we should have seen a HEADERS frame or a continuation frame
+//            //      without END_HEADERS to be here
+//        }
+//
+//        if (continuationFrame.isEndHeaders()) {
+//            headerContinuation = false;
+//        }
 
     }
 
@@ -386,29 +331,23 @@ public final class Http2Stream extends RequestContext {
     // decompression even if the frames are to be discarded. A receiver MUST terminate the connection with a connection
     // error (Section 5.4.1) of type COMPRESSION_ERROR if it does not decompress a field block.
 
-    private void sendHeadersFrame(final StatusCode statusCode, final Http2Headers responseHeaders, boolean endOfStream) throws IOException {
-        if (state == State.OPEN) {
-            // Can send
-            // TODO If send "end of stream", transition to HALF_CLOSED
+    private void sendHeadersFrame(final Http2Headers responseHeaders, boolean endOfStream) throws IOException {
+        if (state == State.HALF_CLOSED) {
+            // Encode the headers into a packed, compressed set of bytes, and write them to the buffer.
+            final var arrays = new ReusableByteArrayOutputStream(responseHeadersFrame.getFieldBlockFragment());
+            final var length = connection.getHeaderCodec().encode(responseHeaders, arrays);
+
+            // Now we have an actual length, we can go back and edit a few bytes of the header with the length
+            responseHeadersFrame
+                    .setStreamId(streamId)
+                    .setEndHeaders(true)
+                    .setEndStream(endOfStream)
+                    .setBlockLength(length);
+
+            final var buf = connection.getOutputBuffer();
+            responseHeadersFrame.write(buf);
+            connection.sendOutput(buf);
         }
-
-        // Initialize the response buffer and fill out some placeholder content for the frame header
-        responseBuffer.reset();
-        final var frame = new HeadersFrame();
-        frame.setStreamId(streamId);
-        frame.setEndHeaders(endOfStream);
-        frame.write(responseBuffer);
-
-        // Encode the headers into a packed, compressed set of bytes, and write them to the buffer.
-        responseHeaders.putStatus(statusCode);
-        final var codec = connection.getHeaderCodec();
-        final var length = codec.encode(responseHeaders, responseBuffer);
-        assert length == (responseBuffer.size() - Frame.FRAME_HEADER_SIZE) : "Length was unexpected!!";
-
-        // Now we have an actual length, we can go back and edit a few bytes of the header with the length
-        responseBuffer.position(0);
-        responseBuffer.write24BitInteger(length);
-        sendFrame();
     }
 
     private void sendWindowUpdateFrame() {
@@ -432,7 +371,62 @@ public final class Http2Stream extends RequestContext {
             // Either endpoint can send a RST_STREAM frame from this state, causing it to transition immediately to
             // "closed".
             state = State.CLOSED;
+            final var buf = connection.getOutputBuffer();
+            responseRstStreamFrame.setStreamId(streamId).setErrorCode(Http2ErrorCode.NO_ERROR).write(buf);
+            connection.sendOutput(buf);
         }
     }
 
+    public final class OutputBufferOutputStream extends OutputStream {
+        private OutputBuffer currentBuffer;
+
+        OutputBufferOutputStream() {
+        }
+
+        void reset() {
+            if (currentBuffer == null) {
+                checkoutBuffer();
+            } else {
+                currentBuffer.reset();
+            }
+            Frame.writeHeader(currentBuffer, 0, FrameType.DATA, (byte) 0, streamId);
+        }
+
+        private void sendRequestOutputBufferContentsAsFrame() {
+            submitFrame(false);
+            checkoutBuffer();
+            Frame.writeHeader(currentBuffer, 0, FrameType.CONTINUATION, (byte) 0, streamId);
+        }
+
+        private void sendRequestOutputBufferContentsAsLastFrame() {
+            submitFrame(true);
+        }
+
+        private void checkoutBuffer() {
+            currentBuffer = connection.getOutputBuffer();
+            currentBuffer.setOnDataFullCallback(this::sendRequestOutputBufferContentsAsLastFrame);
+            currentBuffer.setOnCloseCallback(this::sendRequestOutputBufferContentsAsFrame);
+        }
+
+        private void submitFrame(boolean endOfStream) {
+            final var size = currentBuffer.size();
+            currentBuffer.position(0);
+            currentBuffer.write24BitInteger(size - Frame.FRAME_HEADER_SIZE);
+            currentBuffer.position(4);
+            currentBuffer.writeByte(endOfStream ? 1 : 0);
+            currentBuffer.position(size);
+            connection.sendOutput(currentBuffer);
+            currentBuffer = null;
+        }
+
+        @Override
+        public void write(int b) {
+            currentBuffer.write(b);
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) {
+            currentBuffer.write(b, off, len);
+        }
+    }
 }

@@ -78,8 +78,21 @@ public final class HeadersFrame extends HeadersFrameBase {
      *
      * @param value The value for the end stream flag.
      */
-    public void setEndStream(boolean value) {
+    public HeadersFrame setEndStream(boolean value) {
         super.setEighthFlag(value);
+        return this;
+    }
+
+    @Override
+    public HeadersFrame setEndHeaders(boolean endHeaders) {
+        super.setEndHeaders(endHeaders);
+        return this;
+    }
+
+    @Override
+    public HeadersFrame setBlockLength(int blockLength) {
+        super.setBlockLength(blockLength);
+        return this;
     }
 
     /**

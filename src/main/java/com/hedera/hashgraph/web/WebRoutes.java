@@ -71,6 +71,10 @@ public final class WebRoutes {
     }
 
     public WebRequestHandler match(String method, String path) {
+        if (method == null || path == null) {
+            return null;
+        }
+
         final var m = method.toUpperCase();
         final var key = m + "-" + path;
         return routes.get(key);

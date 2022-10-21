@@ -1,11 +1,8 @@
 package com.hedera.hashgraph.web.impl.session;
 
 import com.hedera.hashgraph.web.HttpVersion;
-import com.hedera.hashgraph.web.StatusCode;
-import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.WebRequest;
 import com.hedera.hashgraph.web.impl.Dispatcher;
-import com.hedera.hashgraph.web.impl.util.ReusableByteArrayInputStream;
 
 import java.io.InputStream;
 import java.util.Objects;
@@ -39,7 +36,7 @@ public abstract class RequestContext implements WebRequest {
     /**
      * This field is set while parsing the HTTP request, and before the request is sent to a handler.
      */
-    protected HttpVersion version;
+    protected final HttpVersion version;
 
     // =================================================================================================================
     // ConnectionContext Methods
@@ -49,8 +46,9 @@ public abstract class RequestContext implements WebRequest {
      *
      * @param dispatcher The dispatcher to send this request to. Must not be null.
      */
-    protected RequestContext(final Dispatcher dispatcher) {
+    protected RequestContext(final Dispatcher dispatcher, final HttpVersion version) {
         this.dispatcher = Objects.requireNonNull(dispatcher);
+        this.version = version;
     }
 
     /**
@@ -59,7 +57,6 @@ public abstract class RequestContext implements WebRequest {
     protected void reset() {
         method = null;
         path = null;
-        version = null;
     }
 
     // =================================================================================================================
