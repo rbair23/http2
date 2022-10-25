@@ -240,15 +240,10 @@ public final class ChannelManager implements Runnable, AutoCloseable {
                 itr.remove();
             }
             // check all connections are well-behaved
-            for (int i = 0; i < MAX_CONNECTIONS_TO_CHECK_PER_LOOP; i++, connectionContextsCursor++) {
-                if (connectionContexts.isEmpty()) {
-                    return;
-                }
-
+            for (int i = 0; i < MAX_CONNECTIONS_TO_CHECK_PER_LOOP && connectionContexts.size() > 0; i++, connectionContextsCursor ++) {
                 if (connectionContextsCursor >= connectionContexts.size()) {
                     connectionContextsCursor = 0;
                 }
-
                 final ConnectionContext cc = connectionContexts.get(connectionContextsCursor);
                 if (cc.isTerminated() || !cc.checkClientIsWellBehaving()) {
                     connectionContexts.remove(connectionContextsCursor);

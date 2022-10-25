@@ -7,7 +7,6 @@ import okhttp3.Request;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.Collections;
 
@@ -18,17 +17,17 @@ class EchoTest {
     @Test
     void echo() throws IOException {
         final var server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
-        server.getRoutes().get("/echo", req -> {
+        server.getRoutes().get("/echo", (req, response) -> {
             assertEquals("GET", req.getMethod());
             assertEquals(HttpVersion.HTTP_2, req.getVersion());
             assertEquals("/echo", req.getPath());
 
             final var responseBody = "Hello World!";
-            req.getResponse()
+            response
                     .statusCode(StatusCode.OK_200)
                     .header("Content-Length", "" + responseBody.length())
                     .header("Server", "EchoTest")
-                    .body(responseBody);
+                    .respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT, responseBody);
         });
         server.start();
 

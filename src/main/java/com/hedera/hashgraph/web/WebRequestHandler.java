@@ -16,9 +16,10 @@ public interface WebRequestHandler {
      * <p>The {@link WebRequest} contains all information related to the request, and is used
      * to generate a {@link WebResponse}.
      *
-     * @param request The request. Will not be null.
+     * @param request  The request. Will not be null.
+     * @param response The response used for building response content. Will not be null.
      * @throws IOException If for some reason the application is unable to respond (such as a
      *                     closed connection).
      */
-    void handle(WebRequest request) throws IOException;
+    void handle(WebRequest request, WebResponse response) throws IOException;
 }

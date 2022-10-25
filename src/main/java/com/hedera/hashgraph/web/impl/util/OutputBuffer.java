@@ -59,6 +59,13 @@ public class OutputBuffer extends OutputStream {
         return this;
     }
 
+    /**
+     * Get the number of free bytes remaining in output buffer
+     */
+    public int remaining() {
+        return buffer.remaining();
+    }
+
     public ByteBuffer getBuffer() {
         // TODO Throw if closed
         return buffer;
@@ -90,6 +97,16 @@ public class OutputBuffer extends OutputStream {
     public void write(byte[] b, int off, int len) {
         fullIfNotRemaining(len);
         buffer.put(b,off,len);
+    }
+
+    /**
+     * Write method for writing a whole byte array
+     *
+     * @param b   the data to write into buffer
+     */
+    public void write(byte[] b) {
+        fullIfNotRemaining(b.length);
+        buffer.put(b,0,b.length);
     }
 
     public void write(OutputBuffer anotherBuffer) {

@@ -1,15 +1,12 @@
 package com.hedera.hashgraph.web.impl.http2;
 
-import com.hedera.hashgraph.web.ResponseAlreadySentException;
 import com.hedera.hashgraph.web.StatusCode;
 import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.WebResponse;
-import com.hedera.hashgraph.web.impl.WebHeadersImpl;
-import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.Objects;
+import java.nio.charset.Charset;
 
 class Http2WebResponse implements WebResponse {
     private static final Http2Headers headers = new Http2Headers();
@@ -30,23 +27,36 @@ class Http2WebResponse implements WebResponse {
     }
 
     @Override
-    public WebResponse body(String bodyAsString) throws ResponseAlreadySentException {
-        if (bodyAsString != null) {
-            body(bodyAsString.getBytes());
-        }
-        return this;
+    public void respond(StatusCode code) {
+        statusCode(code);
     }
 
     @Override
-    public WebResponse body(byte[] bodyAsBytes) throws ResponseAlreadySentException {
+    public void respond(String contentType, String bodyAsString, Charset charset) {
+        if (bodyAsString != null) {
+            respond(contentType, bodyAsString.getBytes(charset));
+        }
+    }
+
+    @Override
+    public void respond(String contentType, byte[] bodyAsBytes)  {
+        contentType(contentType);
         if (bodyAsBytes != null && bodyAsBytes.length > 0) {
             out.write(bodyAsBytes, 0, bodyAsBytes.length);
         }
-        return this;
+    }
+
+
+    @Override
+    public OutputStream respond(String contentType) throws IOException {
+        contentType(contentType);
+        return out;
     }
 
     @Override
-    public OutputStream body() throws ResponseAlreadySentException, IOException {
+    public OutputStream respond(String contentType, int contentLength) throws IOException {
+        contentType(contentType);
+        // TODO what should I do with contentLength?
         return out;
     }
 

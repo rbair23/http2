@@ -1,8 +1,8 @@
 package com.hedera.hashgraph.web.impl;
 
-import com.hedera.hashgraph.web.ResponseAlreadySentException;
 import com.hedera.hashgraph.web.StatusCode;
 import com.hedera.hashgraph.web.WebRequest;
+import com.hedera.hashgraph.web.WebResponse;
 import com.hedera.hashgraph.web.WebRoutes;
 
 import java.util.Objects;
@@ -40,9 +40,10 @@ public final class Dispatcher {
     /**
      * Called to dispatch a web request to be handled
      *
-     * @param webRequest The {@link WebRequest} to dispatch. Not null or closed.
+     * @param webRequest  The {@link WebRequest} to dispatch. Not null or closed.
+     * @param webResponse The response used for setting what response should be sent to client
      */
-    public void dispatch(WebRequest webRequest) {
+    public void dispatch(WebRequest webRequest, WebResponse webResponse) {
         // This callback is invoked when it is time to submit the request.
         // Can I get method and path from the headers?
         final var method = webRequest.getMethod();
@@ -51,25 +52,18 @@ public final class Dispatcher {
         if (handler != null) {
             threadPool.submit(() -> {
                 try (webRequest) {
-                    handler.handle(webRequest);
+                    handler.handle(webRequest,webResponse);
                 } catch (Exception ex) {
                     // Oh dang, some exception happened while handling the request. Oof. Well, somebody
                     // needs to send a 500 error.
-                    try {
-                        webRequest.setResponseStatusCode(StatusCode.INTERNAL_SERVER_ERROR_500);
-                    } catch (ResponseAlreadySentException e) {
-                        throw new RuntimeException(e);
-                    }
+                    webResponse.respond(StatusCode.INTERNAL_SERVER_ERROR_500);
+                    // TODO for now print error to aid debugging
                     ex.printStackTrace();
                 }
             });
         } else {
             // Dude, 404
-            try {
-                webRequest.setResponseStatusCode(StatusCode.NOT_FOUND_404);
-            } catch (ResponseAlreadySentException e) {
-                throw new RuntimeException(e);
-            }
+            webResponse.respond(StatusCode.NOT_FOUND_404);
         }
     }
 }

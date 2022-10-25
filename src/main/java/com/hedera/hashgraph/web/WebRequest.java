@@ -2,7 +2,6 @@ package com.hedera.hashgraph.web;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Objects;
 
 /**
  * Contains all data related to the web request, and provides the means to create a
@@ -58,23 +57,4 @@ public interface WebRequest extends AutoCloseable {
      * @return the stream from which the request body can be read
      */
     InputStream getRequestBody() throws IOException;
-
-    /** TODO comment needs updating
-     * Creates a {@link WebResponse} that can be used to send a response to the client.
-     *
-     * @throws ResponseAlreadySentException if any of the "response" methods has already been called.
-     */
-    WebResponse getResponse() throws ResponseAlreadySentException;
-
-    /** TODO comment needs updating
-     * Responds to the request with the given status code. There is no response body
-     * for this response. This call concludes the request and returns the status code to the client.
-     *
-     * @param statusCode The response code.
-     * @throws ResponseAlreadySentException if any of the "response" methods has already been called.
-     */
-    default void setResponseStatusCode(final StatusCode statusCode) throws ResponseAlreadySentException {
-        Objects.requireNonNull(statusCode);
-        getResponse().statusCode(statusCode);
-    }
 }

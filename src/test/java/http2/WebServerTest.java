@@ -8,7 +8,7 @@ public class WebServerTest {
     @Test
     void simpleConstructor() {
         final var server = new WebServer();
-        server.getRoutes().get("/random", request -> {
+        server.getRoutes().get("/random", (request, response) -> {
             // ...
         });
     }
@@ -16,7 +16,7 @@ public class WebServerTest {
     @Test
     void hostPortConstructor() {
         final var server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
-        server.getRoutes().post("/echo", request -> {
+        server.getRoutes().post("/echo", (request, response) -> {
             // ...
         });
     }
@@ -29,7 +29,7 @@ public class WebServerTest {
                 .backlog(120)
                 .noDelay(true)
                 .build());
-        server.getRoutes().put("/store", request -> {
+        server.getRoutes().put("/store", (request, response) -> {
             // ...
         });
     }

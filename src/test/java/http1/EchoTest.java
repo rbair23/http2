@@ -1,5 +1,6 @@
 package http1;
 
+import com.hedera.hashgraph.web.WebResponse;
 import com.hedera.hashgraph.web.WebServer;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -30,6 +31,28 @@ class EchoTest {
         server.stop(Duration.ofSeconds(1));
     }
 
+    @Test
+    void testSimpleGet() throws Exception {
+        // create server
+        final String responseString = "Hello You";
+        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
+        server.getRoutes().get("/hello", (request, response) ->
+                response.respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT, responseString));
+        server.start();
+        // test url
+        final Request request = new Request.Builder()
+                .url("http://localhost:" + server.getBoundAddress().getPort() + "/hello")
+                .get()
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            final String responseBody = response.body().string();
+            assertEquals(responseString, responseBody);
+        }
+        // stop server
+        server.stop(Duration.ofSeconds(1));
+    }
 //    @ParameterizedTest // TODO test empty string
 //    @ValueSource(strings = {" ", "Hello World!", """
 //            This is a multi line test

@@ -63,6 +63,7 @@ public final class ContextReuseManager {
      * Create a new instance
      *
      * @param dispatcher cannot be null
+     * @param config Web server configuration, cannot be null.
      */
     public ContextReuseManager(final Dispatcher dispatcher, final WebServerConfig config) {
         this.config = Objects.requireNonNull(config);
@@ -78,7 +79,7 @@ public final class ContextReuseManager {
      */
     public Http1ConnectionContext checkoutHttp1ConnectionContext() {
         return idleHttp1ChannelContexts.checkout(
-                () -> new Http1ConnectionContext(this, dispatcher));
+                () -> new Http1ConnectionContext(this, dispatcher, config));
     }
 
     /**

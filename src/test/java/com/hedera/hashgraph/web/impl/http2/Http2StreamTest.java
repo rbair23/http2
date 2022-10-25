@@ -15,7 +15,6 @@ import com.twitter.hpack.Encoder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -72,7 +71,7 @@ class Http2StreamTest {
         // were properly setup
         final var path = "/handleHeaders_completeHeaderWithNoDataFramesInvokesCallback";
         final var handlerCalled = new AtomicBoolean(false);
-        routes.get(path, request -> {
+        routes.get(path, (request, response) -> {
             handlerCalled.set(true);
             assertEquals("GET", request.getMethod());
             assertEquals(path, request.getPath());
@@ -87,7 +86,7 @@ class Http2StreamTest {
             assertEquals(0, request.getRequestBody().available());
             assertEquals(-1, request.getRequestBody().read());
 
-            request.setResponseStatusCode(StatusCode.OK_200);
+            response.respond(StatusCode.OK_200);
         });
 
         final var ctx = ctxManager.checkoutHttp2RequestContext();

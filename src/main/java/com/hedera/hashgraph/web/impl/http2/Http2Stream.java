@@ -149,11 +149,6 @@ public final class Http2Stream extends RequestContext {
     }
 
     @Override
-    public WebResponse getResponse() throws ResponseAlreadySentException {
-        return webResponse;
-    }
-
-    @Override
     public void close() {
         // TODO This is wrong. So, so, wrong.
         // If we are closed while in the HALF_CLOSED state, then maybe(???) this means we handled things
@@ -219,7 +214,7 @@ public final class Http2Stream extends RequestContext {
         // we can transition directly to respond mode (HALF_CLOSED).
         if (headersFrame.isEndStream()) {
             state = State.HALF_CLOSED;
-            dispatcher.dispatch(this);
+            dispatcher.dispatch(this, webResponse);
         }
     }
 

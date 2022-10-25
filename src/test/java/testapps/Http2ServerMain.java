@@ -1,6 +1,5 @@
 package testapps;
 
-import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.WebServer;
 
 import java.io.IOException;
@@ -9,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 public class Http2ServerMain {
     public static void main(String[] args) throws IOException {
         WebServer server = new WebServer("localhost", 54321);
-        server.getRoutes().get("/hello", request -> {
+        server.getRoutes().get("/hello", (request, response) -> {
             // create response
             byte[] hello = "Hello back to you!".getBytes(StandardCharsets.US_ASCII);
 //            request.getResponse()
