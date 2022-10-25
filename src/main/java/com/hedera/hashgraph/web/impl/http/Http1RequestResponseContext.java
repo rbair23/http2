@@ -156,7 +156,6 @@ class Http1RequestResponseContext extends RequestContext implements WebResponse 
         if (respondHasBeenCalled) {
             throw new IllegalStateException("You can call respond() after respond() has already been called.");
         }
-        respondHasBeenCalled = true;
         this.responseStatusCode = code;
         respond(CONTENT_TYPE_PLAIN_TEXT, code.message(), StandardCharsets.US_ASCII);
     }
@@ -177,14 +176,14 @@ class Http1RequestResponseContext extends RequestContext implements WebResponse 
         respondHasBeenCalled = true;
         responseHeaders.setContentType(contentType);
         responseHeaders.setContentLength(bodyAsBytes.length);
-        responseStatusCode = StatusCode.OK_200;
+        if (responseStatusCode == null) responseStatusCode = StatusCode.OK_200;
         // send response
         OutputBuffer outputBuffer = checkoutOutputBuffer.get();
         writeResponseStatusLineAndHeaders(outputBuffer);
         // write as much of the body bytes into buffer as will fit, then send and get new buffer if needed
         int bytesToBeSent = bodyAsBytes.length;
         while (bytesToBeSent > 0) {
-            final int bytesThatCanBeSent = Math.max(outputBuffer.remaining(), bytesToBeSent);
+            final int bytesThatCanBeSent = Math.min(outputBuffer.remaining(), bytesToBeSent);
             final int startOffset = bodyAsBytes.length - bytesThatCanBeSent;
             outputBuffer.write(bodyAsBytes,startOffset,bytesThatCanBeSent);
             bytesToBeSent -= bytesThatCanBeSent;
@@ -229,7 +228,7 @@ class Http1RequestResponseContext extends RequestContext implements WebResponse 
         respondHasBeenCalled = true;
         responseHeaders.setContentType(contentType);
         responseHeaders.setContentLength(contentLength);
-        responseStatusCode = StatusCode.OK_200;
+        if (responseStatusCode == null) responseStatusCode = StatusCode.OK_200;
         sendResponseStatusLineAndHeaders();
         // create low level sending stream
         OutputStream outputStream = new OutputBufferOutputStream(

@@ -1,12 +1,15 @@
 package http1;
 
+import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.WebResponse;
 import com.hedera.hashgraph.web.WebServer;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
+import okhttp3.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,7 +28,7 @@ class EchoTest {
         WebServer server = new WebServer("localhost", 12345);
         server.start();
 
-        final var response = sendRequest(server.getBoundAddress().getPort(),"/BAD_PATH");
+        final var response = sendRequest(server,"/BAD_PATH");
         assertEquals(404,response.code());
 
         server.stop(Duration.ofSeconds(1));
@@ -40,12 +43,7 @@ class EchoTest {
                 response.respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT, responseString));
         server.start();
         // test url
-        final Request request = new Request.Builder()
-                .url("http://localhost:" + server.getBoundAddress().getPort() + "/hello")
-                .get()
-                .build();
-
-        try (Response response = client.newCall(request).execute()) {
+        try (Response response = sendRequest(server,"/hello")) {
             assertEquals(200, response.code());
             final String responseBody = response.body().string();
             assertEquals(responseString, responseBody);
@@ -53,103 +51,15 @@ class EchoTest {
         // stop server
         server.stop(Duration.ofSeconds(1));
     }
-//    @ParameterizedTest // TODO test empty string
-//    @ValueSource(strings = {" ", "Hello World!", """
-//            This is a multi line test
-//            \r\n with special chars \t \u1827
-//            """})
-//    void testEcho(String testString) throws Exception {
-//        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
-//        server.getRoutes().post("/echo", request -> {
-//            final int contentSize = request.getRequestHeaders().getContentLength();
-//            System.out.println("contentSize = " + contentSize);
-//            final InputStream in = request.getRequestBody();
-//            byte[] contentBytes = new byte[contentSize];
-//            int bytesRead = in.read(contentBytes);
-//            assertEquals(contentSize, bytesRead);
-//            in.close();
-//            System.out.println("contentBytes = [" + new String(contentBytes)+"]");
-//            // create response
-//            final WebHeaders responseHeaders = new WebHeaders();
-//            responseHeaders.setContentLength(contentSize);
-//            responseHeaders.setContentType(request.getRequestHeaders().getContentType());
-//            try(final OutputStream out = request.startResponse(StatusCode.OK_200,responseHeaders)) {
-//                out.write(contentBytes);
-//            }
-//        });
-//        server.start();
-//
-//        final Request request = new Request.Builder()
-//                .url("http://localhost:" + server.getBoundAddress().getPort() + "/echo")
-//                .post(RequestBody.create(testString, MediaType.get("text/plain")))
-//                .build();
-//
-//        try (Response response = client.newCall(request).execute()) {
-//            if (!response.isSuccessful()) throw new IOException("Unexpected code " + response);
-//
-//            final String responseBody = response.body().string();
-//            assertEquals(testString, responseBody);
-//        }
-//
-//        server.stop(Duration.ofSeconds(1));
-//    }
 
-    private Response sendRequest(int port, String path) throws Exception {
-        final var request = new Request.Builder()
-                .url("http://localhost:" + port + path)
-                .get()
-                .build();
-
-        final var response = client.newCall(request).execute();
-        System.out.println(response.body().string());
-        return response;
-    }
-
-//    public static void main(String[] args) throws IOException {
-//        WebServer server = new WebServer("localhost", 54321);
-//        server.getRoutes().get("/hello", request -> {
-//            // create response
-//            byte[] hello = "Hello back to you!".getBytes(StandardCharsets.US_ASCII);
-//            final WebHeaders responseHeaders = new WebHeaders();
-//            responseHeaders.setContentLength(hello.length);
-//            responseHeaders.setContentType("text/plain");
-//            try(final OutputStream out = request.startResponse(StatusCode.OK_200,responseHeaders)) {
-//                out.write(hello);
-//            }
-//        });
-//        server.getRoutes().post("/echo", request -> {
-//            final int contentSize = request.getRequestHeaders().getContentLength();
-//            System.out.println("contentSize = " + contentSize);
-//            final InputStream in = request.getRequestBody();
-//            byte[] contentBytes = new byte[contentSize];
-//            int bytesRead = in.read(contentBytes);
-//            assertEquals(contentSize, bytesRead);
-//            in.close();
-//            System.out.println("contentBytes = [" + new String(contentBytes)+"]");
-//            // create response
-//            final WebHeaders responseHeaders = new WebHeaders();
-//            responseHeaders.setContentLength(contentSize);
-//            responseHeaders.setContentType(request.getRequestHeaders().getContentType());
-//            try(final OutputStream out = request.startResponse(StatusCode.OK_200,responseHeaders)) {
-//                out.write(contentBytes);
-//            }
-//        });
-//        server.start();
-//        System.out.println("server.getBoundAddress().getPort() = " + server.getBoundAddress().getPort());
-//    }
-
-}
-
-/*
-
-    @ParameterizedTest
-    @ValueSource(strings = {"", " ", "Hello World!", """
+    @ParameterizedTest // TODO test empty string
+    @ValueSource(strings = {" ", "Hello World!", """
             This is a multi line test
             \r\n with special chars \t \u1827
             """})
     void testEcho(String testString) throws Exception {
         WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
-        server.getRoutes().post("/echo", request -> {
+        server.getRoutes().post("/echo", (request, response) -> {
             final int contentSize = request.getRequestHeaders().getContentLength();
             System.out.println("contentSize = " + contentSize);
             final InputStream in = request.getRequestBody();
@@ -159,24 +69,9 @@ class EchoTest {
             in.close();
             System.out.println("contentBytes = [" + new String(contentBytes)+"]");
             // create response
-            final WebHeaders responseHeaders = new WebHeaders();
-            responseHeaders.setContentLength(contentSize);
-            responseHeaders.setContentType(request.getRequestHeaders().getContentType());
-            try(final OutputStream out = request.startResponse(StatusCode.OK_200,responseHeaders)) {
-                out.write(contentBytes);
-            }
+            response.respond(request.getRequestHeaders().getContentType(), contentBytes);
         });
         server.start();
-//
-//        try(final var helloResponse = sendRequest(server.getBoundAddress().getPort(), "/echo", testString)) {
-//            System.out.println("helloResponse = " + helloResponse);
-//            System.out.println("helloResponse.headers() = " + helloResponse.headers().toString().replace("\n","\n            "));
-//            System.out.println("helloResponse.body() = " + helloResponse.body());
-//            System.out.println("helloResponse.body().contentLength = " + helloResponse.body().contentLength());
-//            System.out.println("helloResponse.body().contentType = " + helloResponse.body().contentType());
-//            System.out.println("helloResponse.body().bytes = " + helloResponse.body().bytes());
-//            assertEquals(testString, helloResponse.body().string());
-//        }
 
         final Request request = new Request.Builder()
                 .url("http://localhost:" + server.getBoundAddress().getPort() + "/echo")
@@ -186,12 +81,22 @@ class EchoTest {
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) throw new IOException("Unexpected code " + response);
 
-            System.out.println(response.body().string());
-            assertEquals(testString, response.body().string());
+            final String responseBody = response.body().string();
+            assertEquals(testString, responseBody);
         }
-
 
         server.stop(Duration.ofSeconds(1));
     }
 
- */
+    private Response sendRequest(WebServer server, String path) throws Exception {
+        final var request = new Request.Builder()
+                .url("http:/" + server.getBoundAddress() + path)
+                .get()
+                .build();
+
+        final var response = client.newCall(request).execute();
+        System.out.println(response.body().string());
+        return response;
+    }
+
+}

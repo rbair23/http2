@@ -232,7 +232,6 @@ public abstract class ConnectionContext implements AutoCloseable {
      */
     @Override
     public void close() {
-        System.out.println("ConnectionContext.close");
         if (!closed) {
             this.closed = true;
             if (!channel.isOpen()) {
