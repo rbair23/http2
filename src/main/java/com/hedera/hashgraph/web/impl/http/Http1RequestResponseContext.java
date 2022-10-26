@@ -52,7 +52,7 @@ class Http1RequestResponseContext extends RequestContext implements WebResponse 
      */
     protected Http1RequestResponseContext(Dispatcher dispatcher, Supplier<OutputBuffer> checkoutOutputBuffer,
                                           Consumer<OutputBuffer> sendResponse, Runnable sendingComplete) {
-        super(dispatcher, HttpVersion.HTTP_1);
+        super(dispatcher, HttpVersion.HTTP_1_1);
         this.checkoutOutputBuffer = checkoutOutputBuffer;
         this.sendResponse = sendResponse;
         this.sendingComplete = sendingComplete;
@@ -157,7 +157,7 @@ class Http1RequestResponseContext extends RequestContext implements WebResponse 
             throw new IllegalStateException("You can call respond() after respond() has already been called.");
         }
         this.responseStatusCode = code;
-        respond(CONTENT_TYPE_PLAIN_TEXT, code.message(), StandardCharsets.US_ASCII);
+        respond(CONTENT_TYPE_HTML_TEXT, code.code() + " : " + code.message(), StandardCharsets.US_ASCII);
     }
 
     @Override
@@ -293,5 +293,14 @@ class Http1RequestResponseContext extends RequestContext implements WebResponse 
         sendResponse.accept(outputBuffer);
         // mark as response sent
         sendingComplete.run();
+    }
+
+    @Override
+    public String toString() {
+        return "Http1RequestResponseContext{" +
+                method +" "+path+" " +version.versionString()+
+                ", respondHasBeenCalled=" + respondHasBeenCalled +
+                ", requestHeaders=" + requestHeaders +
+                '}';
     }
 }

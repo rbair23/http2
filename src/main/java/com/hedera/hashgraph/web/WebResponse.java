@@ -11,7 +11,8 @@ import java.nio.charset.StandardCharsets;
  * an {@link IllegalStateException}
  */
 public interface WebResponse {
-    String CONTENT_TYPE_PLAIN_TEXT = "/text/plain";
+    String CONTENT_TYPE_PLAIN_TEXT = "text/plain";
+    String CONTENT_TYPE_HTML_TEXT = "text/html";
     String CONTENT_TYPE_HTML = "text/html; charset=UTF-8";
     String CONTENT_TYPE_JSON = "application/json";
 

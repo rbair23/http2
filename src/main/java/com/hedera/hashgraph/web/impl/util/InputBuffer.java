@@ -366,7 +366,6 @@ public final class InputBuffer {
             if (majorChar == '1' && minorChar == '1') return HttpVersion.HTTP_1_1;
             if (majorChar == '2' && minorChar == '0') return HttpVersion.HTTP_2;
         }
-
         return null;
     }
 

@@ -1,6 +1,5 @@
 package http1;
 
-import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.WebResponse;
 import com.hedera.hashgraph.web.WebServer;
 import okhttp3.*;
@@ -10,11 +9,15 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-@SuppressWarnings("SameParameterValue")
+@SuppressWarnings({"SameParameterValue", "ConstantConditions"})
 class EchoTest {
     private final OkHttpClient client = new OkHttpClient.Builder()
             .followRedirects(false)
@@ -27,10 +30,27 @@ class EchoTest {
     void test404() throws Exception {
         WebServer server = new WebServer("localhost", 12345);
         server.start();
-
-        final var response = sendRequest(server,"/BAD_PATH");
-        assertEquals(404,response.code());
-
+        // test url
+        try (final var response = sendRequest(server,"/BAD_PATH")) {
+            assertEquals(404, response.code());
+            // stop server
+            server.stop(Duration.ofSeconds(1));
+        }
+    }
+    @Test
+    void test404Sun() throws Exception {
+        WebServer server = new WebServer("localhost", 12345);
+        server.start();
+        // test url
+        final HttpClient httpClient = HttpClient.newHttpClient();
+        final HttpResponse<String> response = httpClient.send(
+                HttpRequest.newBuilder()
+                        .uri(new URI("http:/" + server.getBoundAddress() + "/BAD_PATH"))
+                        .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(404, response.statusCode());
+        // stop server
         server.stop(Duration.ofSeconds(1));
     }
 
@@ -47,6 +67,90 @@ class EchoTest {
             assertEquals(200, response.code());
             final String responseBody = response.body().string();
             assertEquals(responseString, responseBody);
+        }
+        // stop server
+        server.stop(Duration.ofSeconds(1));
+    }
+
+    @Test
+    void testSimpleGetSun() throws Exception {
+        // create server
+        final String responseString = "Hello You";
+        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
+        server.getRoutes().get("/hello", (request, response) ->
+                response.respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT, responseString));
+        server.start();
+        // test url
+        final HttpClient httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
+        final HttpResponse<String> response = httpClient.send(
+                HttpRequest.newBuilder()
+                        .uri(new URI("http:/" + server.getBoundAddress() + "/hello"))
+                        .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, response.statusCode());
+        assertEquals(responseString, response.body());
+        // stop server
+        server.stop(Duration.ofSeconds(1));
+    }
+
+    @Test
+    void testHttp11TwoGets() throws Exception {
+        // create server
+        final String responseString = "Hello You";
+        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
+        server.getRoutes().get("/hello", (request, response) ->
+                response.respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT, responseString));
+        server.start();
+        // test url
+        try (Response response = sendRequest(server,"/hello")) {
+            assertEquals(200, response.code());
+            final String responseBody = response.body().string();
+            assertEquals(responseString, responseBody);
+        }
+        try (Response response = sendRequest(server,"/hello")) {
+            assertEquals(200, response.code());
+            final String responseBody = response.body().string();
+            assertEquals(responseString, responseBody);
+        }
+        // stop server
+        server.stop(Duration.ofSeconds(1));
+    }
+
+    @Test
+    void testHttp11TwoGetsSun() throws Exception {
+        // create server
+        final String responseString = "Hello You";
+        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
+        server.getRoutes().get("/hello", (request, response) ->
+                response.respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT, responseString));
+        server.start();
+        // test url
+        final HttpClient httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
+        {
+            final HttpResponse<String> response = httpClient.send(
+                    HttpRequest.newBuilder()
+                            .uri(new URI("http:/" + server.getBoundAddress() + "/hello"))
+                            .GET()
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, response.statusCode());
+            assertEquals(responseString, response.body());
+        }
+        // test url again
+        {
+            final HttpResponse<String> response = httpClient.send(
+                    HttpRequest.newBuilder()
+                            .uri(new URI("http:/" + server.getBoundAddress() + "/hello"))
+                            .GET()
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, response.statusCode());
+            assertEquals(responseString, response.body());
         }
         // stop server
         server.stop(Duration.ofSeconds(1));

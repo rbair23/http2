@@ -46,7 +46,8 @@ public class Http1ConnectionContext extends ConnectionContext {
         HEADER_KEY,
         HEADER_VALUE,
         WAITING_FOR_END_OF_REQUEST_BODY,
-        WAITING_FOR_RESPONSE_TO_BE_SENT
+        WAITING_FOR_RESPONSE_TO_BE_SENT,
+        HTTP2_UPGRADE
     };
 
     /** Parsing state machine current state */
@@ -113,7 +114,7 @@ public class Http1ConnectionContext extends ConnectionContext {
         // loop while there is still data to process, we can go through multiple states
 
         while (inputBuffer.available(1)) {
-//                System.out.println("state = " + state);
+                System.out.println("state = " + state);
             switch (state) {
                 case BEGIN:
                     inputBuffer.mark();
@@ -158,7 +159,6 @@ public class Http1ConnectionContext extends ConnectionContext {
                             // we found a space, so read between mark and current position as string
                             final int bytesRead = inputBuffer.resetToMark();
                             final var version = inputBuffer.readVersion();
-
                             // check for unknown version
                             if (version == null) {
                                 return respondWithError(StatusCode.HTTP_VERSION_NOT_SUPPORTED_505);
@@ -215,9 +215,30 @@ public class Http1ConnectionContext extends ConnectionContext {
                                 inputBuffer.skip(2);
                                 // we are now ready for body
                                 inputBuffer.mark();
-//                                    System.out.println("requestContext.getRequestHeaders() = " + requestContext.getRequestHeaders());
-                                // check headers
+                                System.out.println(requestResponseContext);
+                                // check keepalive header
                                 isKeepAlive = requestResponseContext.getRequestHeaders().getKeepAlive();
+                                System.out.println("isKeepAlive = " + isKeepAlive);
+                                // handle http2 upgrade header
+                                final String connectionHeader = requestResponseContext.getRequestHeaders().get("connection");
+                                final String upgradeHeader = requestResponseContext.getRequestHeaders().get("upgrade");
+                                if (connectionHeader != null && connectionHeader.toLowerCase().contains("upgrade") &&
+                                        upgradeHeader != null && upgradeHeader.toLowerCase().contains("h2c")) {
+                                    // TODO half baked h2c upgrade implementation, server sends a header
+                                    // TODO HTTP2-Settings, http2-settings: AAEAAEAAAAIAAAABAAMAAABkAAQBAAAAAAUAAEAA
+                                    // TODO Need to work out how to pass that to HTTP2 implementation
+                                    // TODO see Http1to2UpgradeTest
+                                    System.out.println("HTTP2 Upgrade started");
+                                    isKeepAlive = true;
+                                    state = State.HTTP2_UPGRADE;
+                                    requestResponseContext.respond(StatusCode.SWITCHING_PROTOCOLS_101);
+                                    // make sure it is sent
+                                    handleOutgoingData();
+                                    // switching protocols response sent, now hand over to http 2 handler
+                                    onConnectionUpgrade.accept(HttpVersion.HTTP_2);
+                                    return HandleResponse.ALL_DATA_HANDLED;
+                                }
+                                // check headers
 //                                    System.out.println("isKeepAlive = " + isKeepAlive);
                                 // check if there is a request body to read
                                 final int bodySize = requestResponseContext.getRequestHeaders().getContentLength();
@@ -231,8 +252,10 @@ public class Http1ConnectionContext extends ConnectionContext {
                                     }
                                 }
                                 // dispatch
+                                System.out.println(" dispatching");
                                 state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
                                 dispatcher.dispatch(requestResponseContext, requestResponseContext);
+                                System.out.println(" dispatching done");
                                 // we have done our job reading data, now up to dispatcher to send response and the
                                 // call callback.
                                 return HandleResponse.ALL_DATA_HANDLED;

@@ -115,6 +115,12 @@ public abstract class ConnectionContext implements AutoCloseable {
             // connection and give up.
             close();
             return HandleResponse.CLOSE_CONNECTION;
+        } catch (Exception e){
+            // Generic exception, we need to clean things up
+            e.printStackTrace(); // LOGGING: Need to log this, maybe as trace or debug
+            // TODO should we be sending a 500 response?
+            close();
+            return HandleResponse.CLOSE_CONNECTION;
         }
     }
 
@@ -149,7 +155,7 @@ public abstract class ConnectionContext implements AutoCloseable {
     }
 
     /**
-     * Queue the provided buffer to be sent. The buffer will be fliped and all bytes between the start of buffer and
+     * Queue the provided buffer to be sent. The buffer will be flipped and all bytes between the start of buffer and
      * current position will be written to the channel next time the channel is ready to accept bytes.
      * <br>
      * This method can be called form any thead
@@ -232,6 +238,8 @@ public abstract class ConnectionContext implements AutoCloseable {
      */
     @Override
     public void close() {
+        System.out.println("ConnectionContext.close");
+        new Exception().printStackTrace(System.out);
         if (!closed) {
             this.closed = true;
             if (!channel.isOpen()) {

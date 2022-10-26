@@ -229,7 +229,13 @@ public final class ChannelManager implements Runnable, AutoCloseable {
                     }
                     // close connection context if needed
                     if (readResponse == HandleResponse.CLOSE_CONNECTION || writeResponse == HandleResponse.CLOSE_CONNECTION) {
+                        System.out.println("readResponse = " + readResponse);
+                        System.out.println("writeResponse = " + writeResponse);
+                        System.out.println("connectionContext.isClosed() = " + connectionContext.isClosed());
+                        System.out.println("connectionContext.isTerminated() = " + connectionContext.isTerminated());
                         connectionContext.close();
+                        System.out.println("key = " + key);
+                        if (connectionContext.isTerminated()) itr.remove();
                     } else if(readResponse == HandleResponse.ALL_DATA_HANDLED && writeResponse == HandleResponse.ALL_DATA_HANDLED) {
                         itr.remove();
                     }
