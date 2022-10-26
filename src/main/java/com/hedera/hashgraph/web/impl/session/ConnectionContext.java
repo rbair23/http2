@@ -2,7 +2,6 @@ package com.hedera.hashgraph.web.impl.session;
 
 import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.impl.ChannelManager;
-import com.hedera.hashgraph.web.impl.http2.frames.Settings;
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
@@ -11,6 +10,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ByteChannel;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -89,38 +89,26 @@ public abstract class ConnectionContext implements AutoCloseable {
      *
      * @param onConnectionUpgrade A callback to be invoked if the context needs to be upgraded. For example,
      *                            the HTTP/1.1 context may invoke this to upgrade to HTTP/2.0.
-     * @return If handle has read all data, left data still to read or wants the connection to be closed.
      */
-    public final HandleResponse handleIncomingData(final Consumer<HttpVersion> onConnectionUpgrade) {
+    public final void handleIncomingData(final Consumer<HttpVersion> onConnectionUpgrade) {
         try {
             // Put the data into the input stream
             final var dataRemains = inputBuffer.addData(channel);
-            final var doHandleResponse = doHandle(onConnectionUpgrade);
-            if (doHandleResponse == HandleResponse.CLOSE_CONNECTION) {
-                close();
-                return HandleResponse.CLOSE_CONNECTION;
-            } else if (dataRemains || doHandleResponse == HandleResponse.DATA_STILL_TO_HANDLED) {
-                return HandleResponse.DATA_STILL_TO_HANDLED;
-            } else {
-                return HandleResponse.ALL_DATA_HANDLED;
-            }
+            doHandle(onConnectionUpgrade);
         } catch (IOException e) {
             // The underlying channel is closed, we need to clean things up
             e.printStackTrace(); // LOGGING: Need to log this, maybe as trace or debug
             // TODO should we be sending a 500 response?
             close();
-            return HandleResponse.CLOSE_CONNECTION;
         } catch (FailedFlushException e) {
             // We failed to flush, most likely because the channel is closed. So close the
             // connection and give up.
             close();
-            return HandleResponse.CLOSE_CONNECTION;
         } catch (Exception e){
             // Generic exception, we need to clean things up
             e.printStackTrace(); // LOGGING: Need to log this, maybe as trace or debug
             // TODO should we be sending a 500 response?
             close();
-            return HandleResponse.CLOSE_CONNECTION;
         }
     }
 
@@ -186,9 +174,8 @@ public abstract class ConnectionContext implements AutoCloseable {
      *
      * @param onConnectionUpgrade A callback to be invoked if the context needs to be upgraded. For example,
      *                            the HTTP/1.1 context may invoke this to upgrade to HTTP/2.0.
-     * @return If handle has read all data, left data still to read or wants the connection to be closed.
      */
-    protected abstract HandleResponse doHandle(final Consumer<HttpVersion> onConnectionUpgrade);
+    protected abstract void doHandle(final Consumer<HttpVersion> onConnectionUpgrade);
 
     /**
      * Resets the state of this channel before being reused. Called by the {@link ContextReuseManager} only.
@@ -268,6 +255,7 @@ public abstract class ConnectionContext implements AutoCloseable {
      * Terminate closes the channel and ends all communication without sending any buffered data or doing any more work
      */
     protected void terminate() {
+        System.out.println("ConnectionContext.terminate");
         if (channel.isOpen()) {
             try {
                 this.channel.close();

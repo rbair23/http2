@@ -7,7 +7,6 @@ import com.hedera.hashgraph.web.WebServerConfig;
 import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
-import com.hedera.hashgraph.web.impl.session.HandleResponse;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -105,7 +104,7 @@ public class Http1ConnectionContext extends ConnectionContext {
     }
 
     @Override
-    protected HandleResponse doHandle(Consumer<HttpVersion> onConnectionUpgrade) {
+    protected void doHandle(Consumer<HttpVersion> onConnectionUpgrade) {
         //         generic-message = start-line
         //                          *(message-header CRLF)
         //                          CRLF
@@ -149,7 +148,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                             e.printStackTrace();
                             requestResponseContext.statusCode(StatusCode.BAD_REQUEST_400)
                                 .respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT,"Bad URI: "+e.getMessage());
-                            return HandleResponse.CLOSE_CONNECTION;
+                            close();
                         }
                     }
                     break;
@@ -161,7 +160,8 @@ public class Http1ConnectionContext extends ConnectionContext {
                             final var version = inputBuffer.readVersion();
                             // check for unknown version
                             if (version == null) {
-                                return respondWithError(StatusCode.HTTP_VERSION_NOT_SUPPORTED_505);
+                                closeWithError(StatusCode.HTTP_VERSION_NOT_SUPPORTED_505);
+                                return;
                             }
                             // skip over the new line
                             inputBuffer.skip(2);
@@ -174,7 +174,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                                             .header("Connection","Upgrade")
                                             .respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT,
                                         "This service requires use of the HTTP/1.1 or HTTP/2.0 protocol.");
-                                    return HandleResponse.ALL_DATA_HANDLED;
+                                    return;
                                 }
                                 case HTTP_1_1 -> {
                                     // next state
@@ -189,7 +189,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                             }
 //                                System.out.println("----- "+requestContext.getMethod()+"  "+requestContext.getPath()+"  "+requestContext.getVersion());
                         } catch (Exception e) {
-                            return respondWithError(StatusCode.HTTP_VERSION_NOT_SUPPORTED_505);
+                            closeWithError(StatusCode.HTTP_VERSION_NOT_SUPPORTED_505);
                         }
                     }
                     break;
@@ -197,12 +197,12 @@ public class Http1ConnectionContext extends ConnectionContext {
                     if (inputBuffer.available(HTTP2_PREFACE_END.length)) {
                         for (final byte b : HTTP2_PREFACE_END) {
                             if (inputBuffer.readByte() != b) {
-                                return respondWithError(StatusCode.BAD_REQUEST_400);
+                                closeWithError(StatusCode.BAD_REQUEST_400);
+                                return;
                             }
                         }
                         // full preface read, now hand over to http 2 handler
                         onConnectionUpgrade.accept(HttpVersion.HTTP_2);
-                        return HandleResponse.ALL_DATA_HANDLED;
                     }
                     break;
                 case HEADER_KEY:
@@ -236,7 +236,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                                     handleOutgoingData();
                                     // switching protocols response sent, now hand over to http 2 handler
                                     onConnectionUpgrade.accept(HttpVersion.HTTP_2);
-                                    return HandleResponse.ALL_DATA_HANDLED;
+                                    return;
                                 }
                                 // check headers
 //                                    System.out.println("isKeepAlive = " + isKeepAlive);
@@ -248,7 +248,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                                         requestResponseContext.setRequestBody(new BodyInputStream(inputBuffer, bodySize));
                                     } else {
                                         state = State.WAITING_FOR_END_OF_REQUEST_BODY;
-                                        return HandleResponse.ALL_DATA_HANDLED;
+                                        return;
                                     }
                                 }
                                 // dispatch
@@ -258,9 +258,9 @@ public class Http1ConnectionContext extends ConnectionContext {
                                 System.out.println(" dispatching done");
                                 // we have done our job reading data, now up to dispatcher to send response and the
                                 // call callback.
-                                return HandleResponse.ALL_DATA_HANDLED;
+                                return;
                             } else {
-                                respondWithError(StatusCode.BAD_REQUEST_400);
+                                closeWithError(StatusCode.BAD_REQUEST_400);
                             }
                         }
                     }
@@ -297,29 +297,23 @@ public class Http1ConnectionContext extends ConnectionContext {
                         // dispatch
                         state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
                         dispatcher.dispatch(requestResponseContext, requestResponseContext);
-                        // we have done our job reading data, now up to dispatcher to send response and call the callback.
-                        return HandleResponse.ALL_DATA_HANDLED;
                     }
                     break;
                 case WAITING_FOR_RESPONSE_TO_BE_SENT :
                     // we are not reading any data in this state that might be coming in for next http 1.1 request
-                    return HandleResponse.DATA_STILL_TO_HANDLED;
+                    break;
             }
         }
-        return HandleResponse.ALL_DATA_HANDLED;
     }
 
     /**
      * Helper method to send a simple status code error response.
      */
-    private HandleResponse respondWithError(StatusCode statusCode) {
+    private void closeWithError(StatusCode statusCode) {
         if (!requestResponseContext.responseHasBeenSent()) {
             requestResponseContext.respond(statusCode);
-            return isKeepAlive ? HandleResponse.ALL_DATA_HANDLED : HandleResponse.CLOSE_CONNECTION;
-        } else {
-            // error after response has been sent, we can not reuse this connection, so it has to be closed
-            return HandleResponse.CLOSE_CONNECTION;
         }
+        close();
     }
 
     // =================================================================================================================

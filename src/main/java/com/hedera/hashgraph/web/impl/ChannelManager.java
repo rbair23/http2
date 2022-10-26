@@ -6,7 +6,6 @@ import com.hedera.hashgraph.web.impl.http.Http1ConnectionContext;
 import com.hedera.hashgraph.web.impl.http2.Http2ConnectionImpl;
 import com.hedera.hashgraph.web.impl.session.ConnectionContext;
 import com.hedera.hashgraph.web.impl.session.ContextReuseManager;
-import com.hedera.hashgraph.web.impl.session.HandleResponse;
 
 import java.io.IOException;
 import java.nio.channels.*;
@@ -217,28 +216,16 @@ public final class ChannelManager implements Runnable, AutoCloseable {
                         continue;
                     }
                     // channel is open so now see if it is ready for read or write
-                    HandleResponse readResponse = HandleResponse.ALL_DATA_HANDLED;
-                    HandleResponse writeResponse = HandleResponse.ALL_DATA_HANDLED;
                     // do all writes
                     if (key.isWritable()) {
-                        writeResponse = connectionContext.handleOutgoingData();
+                        connectionContext.handleOutgoingData();
                     }
                     // do all reads
                     if (key.isReadable() && !connectionContext.isClosed()) {
-                        readResponse = connectionContext.handleIncomingData(httpVersion -> upgradeHttpVersion(httpVersion, key));
+                        connectionContext.handleIncomingData(httpVersion -> upgradeHttpVersion(httpVersion, key));
                     }
-                    // close connection context if needed
-                    if (readResponse == HandleResponse.CLOSE_CONNECTION || writeResponse == HandleResponse.CLOSE_CONNECTION) {
-                        System.out.println("readResponse = " + readResponse);
-                        System.out.println("writeResponse = " + writeResponse);
-                        System.out.println("connectionContext.isClosed() = " + connectionContext.isClosed());
-                        System.out.println("connectionContext.isTerminated() = " + connectionContext.isTerminated());
-                        connectionContext.close();
-                        System.out.println("key = " + key);
-                        if (connectionContext.isTerminated()) itr.remove();
-                    } else if(readResponse == HandleResponse.ALL_DATA_HANDLED && writeResponse == HandleResponse.ALL_DATA_HANDLED) {
-                        itr.remove();
-                    }
+                    // remove key as we have handled all we can this time around
+                    itr.remove();
                 }
             } catch (CancelledKeyException cancelledKeyException) {
                 cancelledKeyException.printStackTrace();

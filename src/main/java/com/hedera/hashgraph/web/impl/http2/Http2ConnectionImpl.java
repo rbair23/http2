@@ -280,7 +280,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      * <p>This method never upgrades the connection, so the argument is ignored.
      */
     @Override
-    public HandleResponse doHandle(final Consumer<HttpVersion> ignored) {
+    public void doHandle(final Consumer<HttpVersion> ignored) {
         // NOTE: Called on the connection thread
         try {
             // As long as we don't need more data, we will keep processing frames.
@@ -301,7 +301,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
                 }
             }
 
-            return response;
+            return; // response;
         } catch (Http2Exception e) {
             // SPEC: 5.4.1 Connection Error Handling
             // An endpoint that encounters a connection error SHOULD first send a GOAWAY frame (Section 6.8) with the
@@ -321,11 +321,11 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             // open long enough to flush whatever we have in our output buffers out to the client
             // (or they'd never get the GOAWAY frame!), but otherwise the connection should be torn down.
             state = State.CLOSED;
-            return HandleResponse.CLOSE_CONNECTION;
+            return; // HandleResponse.CLOSE_CONNECTION;
         } catch (BadClientException e) {
             // The client was bad, wracked up too many penalties, so we're going to close it down hard.
             state = State.CLOSED;
-            return HandleResponse.CLOSE_CONNECTION;
+            return; // HandleResponse.CLOSE_CONNECTION;
         }
     }
 
