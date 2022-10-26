@@ -95,30 +95,18 @@ public abstract class ConnectionContext implements AutoCloseable {
             // Put the data into the input stream
             final var dataRemains = inputBuffer.addData(channel);
             doHandle(onConnectionUpgrade);
-        } catch (IOException e) {
+        } catch (Exception e) {
             // The underlying channel is closed, we need to clean things up
             e.printStackTrace(); // LOGGING: Need to log this, maybe as trace or debug
             // TODO should we be sending a 500 response?
-            close();
-        } catch (FailedFlushException e) {
-            // We failed to flush, most likely because the channel is closed. So close the
-            // connection and give up.
-            close();
-        } catch (Exception e){
-            // Generic exception, we need to clean things up
-            e.printStackTrace(); // LOGGING: Need to log this, maybe as trace or debug
-            // TODO should we be sending a 500 response?
-            close();
+            terminate();
         }
     }
 
     /**
-     * Write as much pending data to the channel as the channel will accept. Returning ALL_DATA_HANDLED if all pending
-     * data was written to channel or DATA_STILL_TO_HANDLED if channel would not accept all data without blocking.
-     *
-     * @return if app pending data was written or not or we are done with channel, and it can be closed.
+     * Write as much pending data to the channel as the channel will accept.
      */
-    public final HandleResponse handleOutgoingData() {
+    public final void handleOutgoingData() {
         try {
             while (!waitingForWriteOutputBufferQueue.isEmpty()) {
                 final OutputBuffer outputBuffer = waitingForWriteOutputBufferQueue.peek();
@@ -128,18 +116,19 @@ public abstract class ConnectionContext implements AutoCloseable {
 
                 channel.write(buffer);
                 if (buffer.hasRemaining()) {
-                    // not all data was written
-                    return HandleResponse.DATA_STILL_TO_HANDLED;
+                    // not all data could be written to channel at this time, we will have to wait and come back for
+                    // another go.
+                    return;
                 }
                 // all data was written, so we can remove that buffer and return to pool
                 contextReuseManager.returnOutputBuffer(waitingForWriteOutputBufferQueue.remove());
             }
         } catch (IOException e) {
             e.printStackTrace();
-            return HandleResponse.CLOSE_CONNECTION;
+            closed = true;
         }
-
-        return closed ? HandleResponse.CLOSE_CONNECTION : HandleResponse.ALL_DATA_HANDLED;
+        // terminate if we are closed, and we have finished sending data then terminate
+        if (closed) terminate();
     }
 
     /**
@@ -226,17 +215,16 @@ public abstract class ConnectionContext implements AutoCloseable {
     @Override
     public void close() {
         System.out.println("ConnectionContext.close");
-        new Exception().printStackTrace(System.out);
         if (!closed) {
+            new Exception().printStackTrace(System.out);
             this.closed = true;
             if (!channel.isOpen()) {
                 // the channel is already closed so just close immediately as we can not finish sending data
                 terminate();
             }
-        } else {
             // notify callback that we are starting closing
             if (this.onClose != null) {
-                this.onClose.accept(true, this);
+                this.onClose.accept(false, this);
             }
         }
     }
@@ -248,7 +236,7 @@ public abstract class ConnectionContext implements AutoCloseable {
      * @return True if terminated
      */
     public boolean isTerminated() {
-        return channel == null | !channel.isOpen();
+        return channel == null || !channel.isOpen();
     }
 
     /**
@@ -256,7 +244,8 @@ public abstract class ConnectionContext implements AutoCloseable {
      */
     protected void terminate() {
         System.out.println("ConnectionContext.terminate");
-        if (channel.isOpen()) {
+        new Exception().printStackTrace(System.out);
+        if (channel != null && channel.isOpen()) {
             try {
                 this.channel.close();
             } catch (IOException ignored) {

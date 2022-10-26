@@ -113,7 +113,7 @@ public class Http1ConnectionContext extends ConnectionContext {
         // loop while there is still data to process, we can go through multiple states
 
         while (inputBuffer.available(1)) {
-                System.out.println("state = " + state);
+//                System.out.println("state = " + state);
             switch (state) {
                 case BEGIN:
                     inputBuffer.mark();
@@ -158,6 +158,8 @@ public class Http1ConnectionContext extends ConnectionContext {
                             // we found a space, so read between mark and current position as string
                             final int bytesRead = inputBuffer.resetToMark();
                             final var version = inputBuffer.readVersion();
+                            System.out.println("version = " + version);
+                            requestResponseContext.setVersion(version);
                             // check for unknown version
                             if (version == null) {
                                 closeWithError(StatusCode.HTTP_VERSION_NOT_SUPPORTED_505);
@@ -167,16 +169,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                             inputBuffer.skip(2);
                             // handle versions
                             switch (version) {
-                                case HTTP_1 -> {
-                                    requestResponseContext
-                                            .statusCode(StatusCode.UPGRADE_REQUIRED_426)
-                                            .header("Upgrade","HTTP/1.1, HTTP/2.0")
-                                            .header("Connection","Upgrade")
-                                            .respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT,
-                                        "This service requires use of the HTTP/1.1 or HTTP/2.0 protocol.");
-                                    return;
-                                }
-                                case HTTP_1_1 -> {
+                                case HTTP_1, HTTP_1_1 -> {
                                     // next state
                                     inputBuffer.mark();
                                     state = State.HEADER_KEY;
@@ -217,7 +210,8 @@ public class Http1ConnectionContext extends ConnectionContext {
                                 inputBuffer.mark();
                                 System.out.println(requestResponseContext);
                                 // check keepalive header
-                                isKeepAlive = requestResponseContext.getRequestHeaders().getKeepAlive();
+                                isKeepAlive = requestResponseContext.getVersion() == HttpVersion.HTTP_1_1 ||
+                                        requestResponseContext.getRequestHeaders().getKeepAlive();
                                 System.out.println("isKeepAlive = " + isKeepAlive);
                                 // handle http2 upgrade header
                                 final String connectionHeader = requestResponseContext.getRequestHeaders().get("connection");
@@ -316,7 +310,13 @@ public class Http1ConnectionContext extends ConnectionContext {
         close();
     }
 
-    // =================================================================================================================
+    @Override
+    protected void terminate() {
+        super.terminate();
+        contextReuseManager.returnHttp1ConnectionContext(this);
+    }
+
+// =================================================================================================================
     // Methods called by Http1RequestResponseContext
 
     /**

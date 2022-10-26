@@ -76,6 +76,13 @@ class Http1RequestResponseContext extends RequestContext implements WebResponse 
     }
 
     /**
+     * Called by Http1ConnectionContext to set the http version as it parses request
+     */
+    void setVersion(HttpVersion version) {
+        this.version = version;
+    }
+
+    /**
      * Called by Http1ConnectionContext to set the request body input stream as it parses request
      */
     void setRequestBody(BodyInputStream requestBody) {

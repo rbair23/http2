@@ -162,96 +162,82 @@ public final class ChannelManager implements Runnable, AutoCloseable {
     private void checkConnections() throws IOException {
         // Check for available keys. This call blocks until either some keys are available,
         // or until the timeout is reached.
-        int numKeysAvailable = selector.select(DEFAULT_CHANNEL_TIMEOUT.toMillis());
+        selector.select(key -> {
+                // TODO I'm worried about this. Having the accept selector and the read selector be the same
+                //      and processed by the same thread may mean I can accept at most one new connection
+                //      per iteration of the connections. That could slow the rate of new connections to some
+                //      unacceptable level. I may need two threads, one for handling new connections and
+                //      one for processing existing connections with data.
+                // Get the keys. They may be of two kinds. The set may contain the "acceptKey" indicating
+                // that there is a new connection. Or it may contain one or more other keys that correspond
+                // to a particular connection that has data to be read. For each of these, simply call the
+                // onRead lambda with the key.
 
-        // We found no keys, so we can just return.
-        if (numKeysAvailable == 0) {
-            return;
-        }
+                // If the key in the set is the "acceptKey", then we have a new connection to accept.
+                // To accept a connection, we will need to get the socket channel
+                try {
+                    if (!key.isValid()) {
+                        System.out.println("NON VALID KEY FOUND");
+                    } else if (key == acceptKey && availableConnections.get() > 0) { // handle accept
+                        System.out.println("Accept new connection");
+                        accept();
+                    } else { // handle read/write
+                        final var channel = (SocketChannel) key.channel();
+                        // The channel associated with this key has data to be read. If there is
+                        // an attachment, then it means we've seen this key before, so we can just
+                        // reuse it. If we haven't seen it before, then we'll get a ChannelData and get
+                        // it setup.
+                        var connectionContext = (ConnectionContext) key.attachment();
+                        // check if newly accepted channel that we have never seen before
+                        if (connectionContext == null) {
+                            // Always start with HTTP/1.1
+                            connectionContext = contextReuseManager.checkoutHttp1ConnectionContext();
+                            connectionContext.reset(channel, this::handleOnClose);
+                            key.attach(connectionContext);
+                            availableConnections.decrementAndGet();
+                            connectionContexts.add(connectionContext);
+                        }
+                        // check if channel is closed
+                        if (!channel.isOpen()) {
+                            // we can not do anything if the channel is closed
+                            connectionContext.close();
+                            return;
+                        }
+                        // channel is open so now see if it is ready for read or write
+                        // do all writes
+                        if (key.isValid() && key.isWritable()) {
+                            connectionContext.handleOutgoingData();
+                        }
+                        // do all reads
+                        if (key.isValid() && key.isReadable() && !connectionContext.isClosed()) {
+                            connectionContext.handleIncomingData(httpVersion -> upgradeHttpVersion(httpVersion, key));
+                        }
+                    }
+                } catch (CancelledKeyException cancelledKeyException) {
+//                cancelledKeyException.printStackTrace();
+                        System.out.println("CancelledKeyException - channel has been closed");
+                    }
+                },
+                DEFAULT_CHANNEL_TIMEOUT.toMillis());
 
-        // TODO I'm worried about this. Having the accept selector and the read selector be the same
-        //      and processed by the same thread may mean I can accept at most one new connection
-        //      per iteration of the connections. That could slow the rate of new connections to some
-        //      unacceptable level. I may need two threads, one for handling new connections and
-        //      one for processing existing connections with data.
-        // Get the keys. They may be of two kinds. The set may contain the "acceptKey" indicating
-        // that there is a new connection. Or it may contain one or more other keys that correspond
-        // to a particular connection that has data to be read. For each of these, simply call the
-        // onRead lambda with the key.
-        final var keys = selector.selectedKeys();
-        final var itr = keys.iterator();
-        while (itr.hasNext() && !shutdown) {
-            final var key = itr.next();
-
-            // If the key in the set is the "acceptKey", then we have a new connection to accept.
-            // To accept a connection, we will need to get the socket channel
-            try {
-                if (!key.isValid()) {
-                    System.out.println("NON VALID KEY FOUND");
-                    itr.remove();
-                } else if (key == acceptKey && availableConnections.get() > 0) { // handle accept
-                    itr.remove();
-                    accept();
-                } else { // handle read/write
-                    final var channel = (SocketChannel) key.channel();
-                    // The channel associated with this key has data to be read. If there is
-                    // an attachment, then it means we've seen this key before, so we can just
-                    // reuse it. If we haven't seen it before, then we'll get a ChannelData and get
-                    // it setup.
-                    var connectionContext = (ConnectionContext) key.attachment();
-                    // check if newly accepted channel that we have never seen before
-                    if (connectionContext == null) {
-                        // Always start with HTTP/1.1
-                        connectionContext = contextReuseManager.checkoutHttp1ConnectionContext();
-                        connectionContext.reset(channel, this::handleOnClose);
-                        key.attach(connectionContext);
-                        availableConnections.decrementAndGet();
-                        connectionContexts.add(connectionContext);
-                    }
-                    // check if channel is closed
-                    if (!channel.isOpen()) {
-                        // we can not do anything if the channel is closed
-                        connectionContext.close();
-                        itr.remove();
-                        continue;
-                    }
-                    // channel is open so now see if it is ready for read or write
-                    // do all writes
-                    if (key.isWritable()) {
-                        connectionContext.handleOutgoingData();
-                    }
-                    // do all reads
-                    if (key.isReadable() && !connectionContext.isClosed()) {
-                        connectionContext.handleIncomingData(httpVersion -> upgradeHttpVersion(httpVersion, key));
-                    }
-                    // remove key as we have handled all we can this time around
-                    itr.remove();
-                }
-            } catch (CancelledKeyException cancelledKeyException) {
-                cancelledKeyException.printStackTrace();
-                System.out.println("NON VALID KEY FOUND");
-                itr.remove();
+        // check all connections are well-behaved
+        for (int i = 0; i < MAX_CONNECTIONS_TO_CHECK_PER_LOOP && connectionContexts.size() > 0; i++, connectionContextsCursor ++) {
+            if (connectionContextsCursor >= connectionContexts.size()) {
+                connectionContextsCursor = 0;
             }
-            // check all connections are well-behaved
-            for (int i = 0; i < MAX_CONNECTIONS_TO_CHECK_PER_LOOP && connectionContexts.size() > 0; i++, connectionContextsCursor ++) {
-                if (connectionContextsCursor >= connectionContexts.size()) {
-                    connectionContextsCursor = 0;
-                }
-                final ConnectionContext cc = connectionContexts.get(connectionContextsCursor);
-                if (cc.isTerminated() || !cc.checkClientIsWellBehaving()) {
-                    connectionContexts.remove(connectionContextsCursor);
-                    // we just changed index
-                    connectionContextsCursor = Math.min(0, connectionContextsCursor -1);
-                }
+            final ConnectionContext cc = connectionContexts.get(connectionContextsCursor);
+            if (cc.isTerminated() || !cc.checkClientIsWellBehaving()) {
+                connectionContexts.remove(connectionContextsCursor);
+                // we just changed index
+                connectionContextsCursor = Math.min(0, connectionContextsCursor -1);
             }
         }
     }
 
     private void handleOnClose(boolean isFullyClosed, ConnectionContext closedConnectionContext) {
+        connectionContexts.remove(closedConnectionContext);
         if (isFullyClosed) {
             availableConnections.incrementAndGet();
-        } else {
-            connectionContexts.add(closedConnectionContext);
         }
     }
 

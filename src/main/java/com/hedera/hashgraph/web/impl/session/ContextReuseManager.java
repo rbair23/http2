@@ -89,6 +89,7 @@ public final class ContextReuseManager {
      * @param ctx The context to return. Cannot be null.
      */
     public void returnHttp1ConnectionContext(Http1ConnectionContext ctx) {
+        System.out.println("ContextReuseManager.returnHttp1ConnectionContext");
         idleHttp1ChannelContexts.checkin(Objects.requireNonNull(ctx));
     }
 

@@ -36,7 +36,7 @@ public abstract class RequestContext implements WebRequest {
     /**
      * This field is set while parsing the HTTP request, and before the request is sent to a handler.
      */
-    protected final HttpVersion version;
+    protected HttpVersion version;
 
     // =================================================================================================================
     // ConnectionContext Methods

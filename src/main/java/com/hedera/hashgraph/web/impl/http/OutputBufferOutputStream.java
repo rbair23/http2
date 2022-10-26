@@ -34,12 +34,15 @@ class OutputBufferOutputStream extends OutputStream {
         this.sendResponse = Objects.requireNonNull(sendResponse);
         this.onCLoseCallback = Objects.requireNonNull(onCLoseCallback);
     }
-//
-//    @Override
-//    public void flush() throws IOException {
-//        outputBuffer.sendContentsToChannel(channel);
-//        outputBuffer.reset();
-//    }
+
+    /**
+     * Send the current buffer contents and get a new buffer
+     */
+    @Override
+    public void flush() {
+        sendResponse.accept(currentBuffer);
+        currentBuffer = checkoutOutputBuffer.get();
+    }
 
     @Override
     public void write(int b) throws IOException {
