@@ -3,9 +3,7 @@ package http2.spec;
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.frames.FrameType;
 import com.hedera.hashgraph.web.impl.http2.frames.GoAwayFrame;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 
 import java.io.IOException;
 
@@ -18,24 +16,193 @@ import static org.junit.jupiter.api.Assertions.*;
 @Tag("5")
 class StreamsSpecTest extends SpecTest {
 
-    // Sending a HEADERS frame as a client, or receiving a HEADERS frame as a server, causes the stream to become
-    // "open". The stream identifier is selected as described in Section 5.1.1. The same HEADERS frame can also cause a
-    // stream to immediately become "half-closed".
-    //
-    // TESTS:
-    //     - Sending anything other than HEADERS (or PRIORITY) for a new stream results in a failure
-    //         + Receiving any frame other than HEADERS or PRIORITY on a stream in this state MUST be treated as a
-    //           connection error (Section 5.4.1) of type PROTOCOL_ERROR
-    //     - Sending a HEADERS transitions to open, so any of the things that can be sent in the OPEN state will work
-    //     - Sending a HEADERS with END_STREAM set goes to HALF_CLOSED, so anything that cannot be sent during
-    //       HALF_CLOSED state will fail.
+    @Nested
+    @DisplayName("Section 5.1 Stream States")
+    @Tags({@Tag("5"), @Tag("5.1")})
+    final class FrameFormatTest extends SpecTest {
+        /**
+         * idle: Receiving any frame other than HEADERS or PRIORITY on a stream in this state MUST be treated
+         * as a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("idle: Sends a DATA frame")
+        void sendDataWhileIdle() throws IOException {
+            client.handshake().sendData(true, 1, randomString(8));
 
-    // Sending a PUSH_PROMISE frame on another stream reserves the idle stream that is identified for later use. The
-    // stream state for the reserved stream transitions to "reserved (local)". Only a server may sendAndReceive PUSH_PROMISE
-    // frames.
-    //
-    // TESTS:
-    //     - Sending a PUSH_PROMISE must fail (to any state, but let's verify for a new stream)
+            // This is an unclear part of the specification. Section 6.1 says
+            // to treat this as a stream error.
+            // --------
+            // If a DATA frame is received whose stream is not in "open" or
+            // "half-closed (local)" state, the recipient MUST respond with
+            // a stream error (Section 5.4.2) of type STREAM_CLOSED.
+            verifyStreamError(Http2ErrorCode.PROTOCOL_ERROR, Http2ErrorCode.STREAM_CLOSED);
+        }
+
+        /**
+         * idle: Receiving any frame other than HEADERS or PRIORITY on a stream in this state MUST be treated
+         * as a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("idle: Sends a RST_STREAM frame")
+        void sendRstStreamWhileIdle() throws IOException {
+            client.handshake().sendRstStream(1, Http2ErrorCode.CANCEL);
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+
+        /**
+         * idle: Receiving any frame other than HEADERS or PRIORITY on a stream in this state MUST be treated
+         * as a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("idle: Sends a WINDOW_UPDATE frame")
+        void sendWindowUpdateWhileIdle() throws IOException {
+            client.handshake().sendWindowUpdate(1, 100);
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+
+        /**
+         * idle: Receiving any frame other than HEADERS or PRIORITY on a stream in this state MUST be treated
+         * as a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("idle: Sends a CONTINUATION frame")
+        void sendContinuationWhileIdle() throws IOException {
+            client.handshake().sendContinuation(true, 1, createCommonHeaders());
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+
+        /**
+         * half-closed (remote): If an endpoint receives additional frames, other than WINDOW_UPDATE, PRIORITY, or
+         * RST_STREAM, for a stream that is in this state, it MUST respond with a stream error (Section 5.4.2)
+         * of type STREAM_CLOSED.
+         */
+        @Test
+        @DisplayName("half closed (remote): Sends a DATA frame")
+        void sendDataWhileHalfClosed() throws IOException {
+            final var streamId = 1;
+            client.handshake()
+                    .sendHeaders(true, true, streamId, createCommonHeaders())
+                    .sendData(true, streamId, randomString(12));
+            verifyStreamError(Http2ErrorCode.STREAM_CLOSED);
+        }
+
+        /**
+         * half-closed (remote): If an endpoint receives additional frames, other than WINDOW_UPDATE, PRIORITY, or
+         * RST_STREAM, for a stream that is in this state, it MUST respond with a stream error (Section 5.4.2)
+         * of type STREAM_CLOSED.
+         */
+        @Test
+        @DisplayName("half closed (remote): Sends a HEADERS frame")
+        void sendHeadersWhileHalfClosed() throws IOException {
+            final var streamId = 1;
+            client.handshake()
+                    .sendHeaders(true, true, streamId, createCommonHeaders())
+                    .sendHeaders(true, true, streamId, createCommonHeaders());
+            verifyStreamError(Http2ErrorCode.STREAM_CLOSED);
+        }
+
+        /**
+         * half-closed (remote): If an endpoint receives additional frames, other than WINDOW_UPDATE, PRIORITY, or
+         * RST_STREAM, for a stream that is in this state, it MUST respond with a stream error (Section 5.4.2)
+         * of type STREAM_CLOSED.
+         */
+        @Test
+        @DisplayName("half closed (remote): Sends a CONTINUATION frame")
+        void sendContinuationWhileHalfClosed() throws IOException {
+            final var streamId = 1;
+            client.handshake()
+                    .sendHeaders(true, true, streamId, createCommonHeaders())
+                    .sendContinuation(true, streamId, createCommonHeaders());
+            verifyStreamError(Http2ErrorCode.STREAM_CLOSED);
+        }
+
+        /**
+         * closed: An endpoint that receives any frame other than PRIORITY after receiving a RST_STREAM MUST treat
+         * that as a stream error (Section 5.4.2) of type STREAM_CLOSED.
+         */
+        @Test
+        @DisplayName("closed: Sends a DATA frame after sending RST_STREAM frame")
+        void sendDataAfterRstStream() throws IOException {
+            final var streamId = 1;
+            client.handshake()
+                    .sendHeaders(true, false, streamId, createCommonHeaders())
+                    .sendRstStream(streamId, Http2ErrorCode.CANCEL)
+                    .sendData(true, streamId, randomString(7));
+            verifyStreamError(Http2ErrorCode.STREAM_CLOSED);
+        }
+
+        /**
+         * closed: An endpoint that receives any frame other than PRIORITY after receiving a RST_STREAM MUST treat
+         * that as a stream error (Section 5.4.2) of type STREAM_CLOSED.
+         */
+        @Test
+        @DisplayName("closed: Sends a HEADERS frame after sending RST_STREAM frame")
+        void sendHeadersAfterRstStream() throws IOException {
+            final var streamId = 1;
+            client.handshake()
+                    .sendHeaders(true, false, streamId, createCommonHeaders())
+                    .sendRstStream(streamId, Http2ErrorCode.CANCEL)
+                    .sendHeaders(true, true, streamId, createCommonHeaders());
+            verifyStreamError(Http2ErrorCode.STREAM_CLOSED);
+        }
+
+        /**
+         * closed: An endpoint that receives any frame other than PRIORITY after receiving a RST_STREAM MUST treat
+         * that as a stream error (Section 5.4.2) of type STREAM_CLOSED.
+         */
+        @Test
+        @DisplayName("closed: Sends a CONTINUATION frame after sending RST_STREAM frame")
+        void sendContinuationAfterRstStream() throws IOException {
+            final var streamId = 1;
+            client.handshake()
+                    .sendHeaders(true, false, streamId, createCommonHeaders())
+                    .sendRstStream(streamId, Http2ErrorCode.CANCEL)
+                    .sendContinuation(true, streamId, createCommonHeaders());
+            verifyStreamError(Http2ErrorCode.STREAM_CLOSED);
+        }
+
+        /**
+         * closed: An endpoint that receives any frames after receiving a frame with the END_STREAM flag set
+         * MUST treat that as a connection error (Section 6.4.1) of type STREAM_CLOSED.
+         */
+        @Test
+        @DisplayName("closed: Sends a DATA frame")
+        void sendDataWhileClosed() throws IOException {
+            final var streamId = 1;
+            client.handshake().sendHeaders(true, true, streamId, createCommonHeaders());
+            verifyStreamClosed();
+            client.sendData(true, streamId, randomString(21));
+            verifyStreamError(Http2ErrorCode.STREAM_CLOSED);
+        }
+
+        /**
+         * closed: An endpoint that receives any frames after receiving a frame with the END_STREAM flag set
+         * MUST treat that as a connection error (Section 6.4.1) of type STREAM_CLOSED.
+         */
+        @Test
+        @DisplayName("closed: Sends a HEADERS frame")
+        void sendHeadersWhileClosed() throws IOException {
+            final var streamId = 1;
+            client.handshake().sendHeaders(true, true, streamId, createCommonHeaders());
+            verifyStreamClosed();
+            client.sendHeaders(true, true, streamId, createCommonHeaders());
+            verifyStreamError(Http2ErrorCode.STREAM_CLOSED);
+        }
+
+        /**
+         * closed: An endpoint that receives any frames after receiving a frame with the END_STREAM flag set
+         * MUST treat that as a connection error (Section 6.4.1) of type STREAM_CLOSED.
+         */
+        @Test
+        @DisplayName("closed: Sends a CONTINUATION frame")
+        void sendContinuationWhileClosed() throws IOException {
+            final var streamId = 1;
+            client.handshake().sendHeaders(true, true, streamId, createCommonHeaders());
+            verifyStreamClosed();
+            client.sendContinuation(true, streamId, createCommonHeaders());
+            verifyStreamError(Http2ErrorCode.STREAM_CLOSED);
+        }
+    }
 
     // Opening a stream with a higher-valued stream identifier causes the stream to transition immediately to a
     // "closed" state; note that this transition is not shown in the diagram.

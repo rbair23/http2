@@ -1,11 +1,13 @@
 package http2.spec.utils;
 
 import com.hedera.hashgraph.web.WebHeaders;
+import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Headers;
 import com.hedera.hashgraph.web.impl.http2.frames.Frame;
 import com.hedera.hashgraph.web.impl.http2.frames.FrameType;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Defines a basic interface for sending and receiving data from an HTTP/2 server.
@@ -24,6 +26,12 @@ public interface ClientConnection {
     ClientConnection sendData(boolean endStream, int streamId, byte[] payload) throws IOException;
     ClientConnection sendPriority(int streamId, int streamDep, boolean exclusive, int weight) throws IOException;
     ClientConnection sendContinuation(boolean endHeaders, int streamId, Http2Headers headers) throws IOException;
+    ClientConnection sendRstStream(int streamId, Http2ErrorCode code) throws IOException;
+    ClientConnection sendWindowUpdate(int streamId, int windowIncrement) throws IOException;
 
     <F extends Frame> F awaitFrame(Class<F> clazz) throws IOException;
+
+    default ClientConnection sendData(boolean endStream, int streamId, String payload) throws IOException {
+        return sendData(endStream, streamId, payload == null ? new byte[0] : payload.getBytes(StandardCharsets.UTF_8));
+    }
 }

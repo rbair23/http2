@@ -5,6 +5,7 @@ import com.hedera.hashgraph.web.WebRoutes;
 import com.hedera.hashgraph.web.WebServerConfig;
 import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.impl.http2.Http2ConnectionImpl;
+import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2HeaderCodec;
 import com.hedera.hashgraph.web.impl.http2.Http2Headers;
 import com.hedera.hashgraph.web.impl.http2.frames.*;
@@ -113,6 +114,16 @@ public class DirectClientConnection implements ClientConnection {
         final var out = new ByteArrayOutputStream();
         int length = codec.encode(headers, out);
         return send(new ContinuationFrame(endHeaders, streamId, out.toByteArray(), length));
+    }
+
+    @Override
+    public ClientConnection sendRstStream(int streamId, Http2ErrorCode code) throws IOException {
+        return send(new RstStreamFrame(streamId, code));
+    }
+
+    @Override
+    public ClientConnection sendWindowUpdate(int streamId, int windowIncrement) throws IOException {
+        return send(new WindowUpdateFrame(streamId, windowIncrement));
     }
 
     public DirectClientConnection sendSettings(Settings settings) throws IOException {

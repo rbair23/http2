@@ -18,9 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.LinkedList;
-import java.util.NoSuchElementException;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -94,17 +92,18 @@ abstract class SpecTest {
         assertEquals(streamId, frame.getStreamId());
     }
 
-    protected void verifyStreamError(Http2ErrorCode code) throws IOException {
+    protected void verifyStreamError(Http2ErrorCode... codes) throws IOException {
+        final var acceptable = new HashSet<>(Arrays.asList(codes));
         while (!client.connectionClosed()) {
             final var frame = client.awaitFrame(Frame.class);
             if (frame == null) {
                 // A null frame means the connection was closed. Which is a good thing in this case.
                 return;
             } if (frame instanceof RstStreamFrame rstFrame) {
-                assertEquals(code, rstFrame.getErrorCode());
+                assertTrue(acceptable.contains(rstFrame.getErrorCode()));
                 return;
             } else if (frame instanceof GoAwayFrame goAwayFrame) {
-                assertEquals(code, goAwayFrame.getErrorCode());
+                assertTrue(acceptable.contains(goAwayFrame.getErrorCode()));
                 return;
             }
         }
@@ -116,5 +115,19 @@ abstract class SpecTest {
         if (frame != null) {
             assertEquals(code, frame.getErrorCode());
         }
+    }
+
+    protected void verifyStreamClosed() throws IOException {
+        while (!client.connectionClosed()) {
+            final var frame = client.awaitFrame(Frame.class);
+            if (frame instanceof DataFrame f && f.isEndStream()) {
+                return;
+            } else if (frame instanceof HeadersFrame f && f.isEndStream()) {
+                return;
+            } else if (frame instanceof RstStreamFrame f && f.getErrorCode() == Http2ErrorCode.NO_ERROR) {
+                return;
+            }
+        }
+        fail("Stream was not closed");
     }
 }
