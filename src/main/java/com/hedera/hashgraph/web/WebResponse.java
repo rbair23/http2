@@ -10,7 +10,7 @@ import java.nio.charset.StandardCharsets;
  * "respond" methods. You can only call one respond method and once a "respond" method has been called all methods throw
  * an {@link IllegalStateException}
  */
-public interface WebResponse {
+public interface WebResponse extends AutoCloseable {
     String CONTENT_TYPE_PLAIN_TEXT = "text/plain";
     String CONTENT_TYPE_HTML_TEXT = "text/html";
     String CONTENT_TYPE_HTML = "text/html; charset=UTF-8";

@@ -1,4 +1,4 @@
-package http2.spec;
+package http2.spec.utils;
 
 import org.jetbrains.annotations.NotNull;
 

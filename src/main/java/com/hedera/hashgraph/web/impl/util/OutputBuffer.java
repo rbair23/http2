@@ -16,7 +16,7 @@ public class OutputBuffer extends OutputStream {
 
     // The buffer.position() marks the next position to write into the buffer,
     // while buffer.limit() marks the last possible byte to fill, so the limit
-    // is set to buffer.capacity().
+    // is set to buffer.capacity() unless overridden
     private final ByteBuffer buffer;
 
     public OutputBuffer(int size) {
@@ -54,8 +54,13 @@ public class OutputBuffer extends OutputStream {
     }
 
     public OutputBuffer reset() {
+        return reset(buffer.capacity());
+    }
+
+    public OutputBuffer reset(int limit) {
         // TODO Throw if closed
         buffer.clear();
+        buffer.limit(limit);
         return this;
     }
 

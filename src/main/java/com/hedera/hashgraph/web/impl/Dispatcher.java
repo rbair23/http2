@@ -6,7 +6,9 @@ import com.hedera.hashgraph.web.WebResponse;
 import com.hedera.hashgraph.web.WebRoutes;
 
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 /**
  * The {@code Dispatcher} is responsible for dispatching a {@link WebRequest} to a
@@ -43,27 +45,35 @@ public final class Dispatcher {
      * @param webRequest  The {@link WebRequest} to dispatch. Not null or closed.
      * @param webResponse The response used for setting what response should be sent to client
      */
-    public void dispatch(WebRequest webRequest, WebResponse webResponse) {
+    public Future<?> dispatch(WebRequest webRequest, WebResponse webResponse) {
         // This callback is invoked when it is time to submit the request.
         // Can I get method and path from the headers?
         final var method = webRequest.getMethod();
         final var path = webRequest.getPath();
         final var handler = routes.match(method, path);
         if (handler != null) {
-            threadPool.submit(() -> {
-                try (webRequest) {
-                    handler.handle(webRequest,webResponse);
+            return threadPool.submit(() -> {
+                try {
+                    handler.handle(webRequest, webResponse);
                 } catch (Exception ex) {
                     // Oh dang, some exception happened while handling the request. Oof. Well, somebody
                     // needs to send a 500 error.
                     webResponse.respond(StatusCode.INTERNAL_SERVER_ERROR_500);
                     // TODO for now print error to aid debugging
                     ex.printStackTrace();
+                } finally {
+                    try {
+                        webResponse.close();
+                    } catch (Exception ignored) {
+                    }
                 }
             });
         } else {
             // Dude, 404
             webResponse.respond(StatusCode.NOT_FOUND_404);
+            final var future = new CompletableFuture<>();
+            future.complete(null);
+            return future;
         }
     }
 }

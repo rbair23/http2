@@ -9,13 +9,28 @@ import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import com.hedera.hashgraph.web.impl.util.ReusableByteArrayInputStream;
 import com.hedera.hashgraph.web.impl.util.ReusableByteArrayOutputStream;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.Charset;
 import java.util.Objects;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Represents the {@link WebRequest} for an HTTP/2 stream.
+ * Represents an HTTP/2 stream. A stream has a definite request/response lifecycle.
+ *
+ * <p>The HTTP2 spec has two states for the end of the lifecycle of a request called {@link State#HALF_CLOSED}
+ * and {@link State#CLOSED}. The HALF_CLOSED state is entered into when the request has been fully made,
+ * that is, the headers and request body (if any) have been received. In this state, responses can be formulated
+ * and sent to the client, but no new request information received from the client. The CLOSED state means the
+ * request and responses are complete. This is a terminal state.
+ *
+ * <p>The {@link Dispatcher} will handle the request, and in the case of <b>ANY</b> error, will update the
+ * response with the appropriate state. It then calls {@link WebResponse#close()}, which should move the stream
+ * into the {@link State#HALF_CLOSED} state. If some kind of stream exception occurs, it will cause the stream to
+ * {@link #terminate()}. Or, if the stream finishes sending all the response data, then it will also call
+ * {@link #terminate()}.
  */
 public final class Http2Stream extends RequestContext {
     /**
@@ -44,70 +59,65 @@ public final class Http2Stream extends RequestContext {
         HALF_CLOSED,
         /**
          * The stream is closed and accepts virtually nothing. In fact, when we enter the closed
-         * state, we will move the {@link Http2Stream} back into the
-         * {@link ContextReuseManager} and stop accepting frames. We'll just drop them on the floor.
+         * state, we will move the {@link Http2Stream} back into the {@link ContextReuseManager}
+         * and stop accepting frames. We'll just drop them on the floor.
          */
-        CLOSED,
-        /**
-         * This state is unused, because we do not support PUSH_PROMISE frames (this server doesn't
-         * use them, and the client cannot send them to us).
-         */
-        RESERVED
+        CLOSED
     }
 
     /**
-     * The HTTP/2 stream ID associated with this request
+     * The HTTP/2 stream ID associated with this request. This value is set during
+     * {@link #init(Http2Connection, int, Settings)} and set to -1 during {@link #terminate()}.
      */
     private int streamId = -1;
 
     /**
-     * The current state of this stream.
+     * The current state of this stream. This value is set to {@link State#IDLE} during
+     * {@link #init(Http2Connection, int, Settings)} and set to {@link State#CLOSED} during
+     * {@link #terminate()}.
      */
     private State state = State.IDLE;
 
     /**
-     * A reference to the {@link Http2Connection} that created this stream. It contains some API
+     * A reference to the {@link Http2Connection} that is using this stream. It contains some API
      * that the stream needs, for example, to decode and encode header data, or to submit data to
-     * be sent to the client.
+     * be sent to the client. This value is set during {@link #init(Http2Connection, int, Settings)}
+     * and set back to null when the stream is terminated with {@link #terminate()}.
      */
     private Http2Connection connection;
 
     /**
-     * The request headers. This instance is reused between requests. After we read all the header data,
-     * we parse it and set the headers in this the {@link Http2Headers} instance.
+     * This future represents the currently submitted job to the {@link Dispatcher}. When the stream
+     * is {@link State#CLOSED}, then this job will be canceled if it has not been completed.
+     * Canceling the job will only cause the associated thread to be interrupted, it is up to the
+     * application to respect the {@link InterruptedException} and stop working.
      */
-    private final Http2Headers requestHeaders = new Http2Headers();
+    private Future<?> submittedJob;
 
     /**
-     * A reusable {@link java.io.InputStream} that we use for passing to the handler the
-     * request body stream.
-     *
-     * <p>At first, we place the decoded header data into this buffer, and then after decoding the headers
-     * and storing them in {@link #requestHeaders}, we reset the stream and use it for storing the request
-     * body data.
+     * The current number of "credits", which describe the number of bytes we can send to the client.
+     * While we give it a default value here, it truly doesn't matter because it will be reset in
+     * {@link #init(Http2Connection, int, Settings)}.
      */
-    private final ReusableByteArrayInputStream requestBodyInputStream;
+    private final AtomicInteger streamWindowCredits = new AtomicInteger(Settings.DEFAULT_INITIAL_WINDOW_SIZE);
 
     /**
-     * The object we return to the user to collect the web response.
+     * An implementation of {@link WebRequest} for HTTP/2.
      */
-    private final Http2WebResponse webResponse;
-
-    private final OutputBufferOutputStream responseBuffer;
+    private final Http2WebRequest webRequest = new Http2WebRequest(Settings.INITIAL_FRAME_SIZE);
 
     /**
-     * A {@link HeadersFrame} that can be reused for responding with header data. The byte[] within
-     * the headers frame is large enough to hold the compressed headers.
+     * An implementation of {@link WebResponse} for HTTP/2.
      */
-    private final HeadersFrame responseHeadersFrame = new HeadersFrame();
+    private final Http2WebResponse webResponse = new Http2WebResponse();
 
     /**
-     * A {@link RstStreamFrame} that can be reused for sending reset frame data
+     * A {@link RstStreamFrame} that can be reused for parsing reset frame data
      */
-    private final RstStreamFrame responseRstStreamFrame = new RstStreamFrame();
+    private final RstStreamFrame rstStreamFrame = new RstStreamFrame();
 
     // =================================================================================================================
-    // Constructor & Methods
+    // Constructor & Lifecycle
 
     /**
      * Create a new instance.
@@ -116,10 +126,6 @@ public final class Http2Stream extends RequestContext {
      */
     public Http2Stream(final Dispatcher dispatcher) {
         super(dispatcher, HttpVersion.HTTP_2);
-
-        this.requestBodyInputStream = new ReusableByteArrayInputStream(new byte[Settings.INITIAL_FRAME_SIZE]);
-        this.responseBuffer = new OutputBufferOutputStream();
-        this.webResponse = new Http2WebResponse();
     }
 
     /**
@@ -127,80 +133,378 @@ public final class Http2Stream extends RequestContext {
      *
      * @param connection An implementation of {@link Http2Connection}
      */
-    public void init(final Http2Connection connection, int streamId) {
+    public void init(final Http2Connection connection, int streamId, Settings clientSettings) {
         super.reset();
-        this.state = State.IDLE;
         this.streamId = streamId;
+        this.state = State.IDLE;
         this.connection = Objects.requireNonNull(connection);
-        this.requestBodyInputStream.reuse(0);
-        this.requestHeaders.clear();
-        this.responseBuffer.reset();
-        this.webResponse.reset(responseBuffer);
-
-        // TODO I should reset the frames, just to be sure no data is being reused...
+        this.submittedJob = null;
+        this.streamWindowCredits.set((int) clientSettings.getInitialWindowSize());
+        this.webRequest.init();
+        this.webResponse.init();
     }
 
-    // =================================================================================================================
-    // WebRequest Methods
-
-    @Override
-    public WebHeaders getRequestHeaders() {
-        return requestHeaders;
-    }
-
-    @Override
-    public void close() {
-        // TODO This is wrong. So, so, wrong.
-        // If we are closed while in the HALF_CLOSED state, then maybe(???) this means we handled things
-        // successfully (it really doesn't mean that, we need another signal).
-        if (state == State.HALF_CLOSED) {
-            try {
-                final var responseHeaders = (Http2Headers) webResponse.getHeaders();
-                final var endOfStream = responseBuffer.currentBuffer.size() == 0;
-                sendHeadersFrame(responseHeaders, endOfStream);
-                responseBuffer.sendRequestOutputBufferContentsAsLastFrame();
-            } catch (IOException e) {
-                e.printStackTrace();
+    /**
+     * Terminates the stream, cleaning up any remaining open resources, and returns the stream
+     * to the pool.
+     */
+    void terminate() {
+        if (this.state != State.CLOSED) {
+            // Try to interrupt the handler thread, if there is one.
+            if (submittedJob != null) {
+                submittedJob.cancel(true);
             }
+
+            // Let the connection know that the stream is closed
+            connection.onTerminate(streamId);
+
+            // Reset the internal state to uninitialized values
+            this.streamId = -1;
+            this.state = State.CLOSED;
+            this.connection = null;
+            this.submittedJob = null;
+            this.rstStreamFrame.reset();
         }
+    }
 
-        sendRstStreamFrame();
+    /**
+     * Handler for stream exceptions.
+     *
+     * @param exception The exception to handle.
+     */
+    private void onStreamException(Http2Exception exception) {
+        if (state != State.CLOSED) {
+            // SPEC: 5.4.2 Stream Error Handling
+            // An endpoint that detects a stream error sends a RST_STREAM frame (Section 6.4) that contains the stream
+            // identifier of the stream where the error occurred. The RST_STREAM frame includes an error code that
+            // indicates the type of error.
+            final OutputBuffer outputBuffer = connection.getOutputBuffer();
+            rstStreamFrame.setStreamId(streamId)
+                    .setErrorCode(exception.getCode())
+                    .write(outputBuffer);
+            connection.sendOutput(outputBuffer);
+            connection.onBadClient(streamId);
 
-        // TODO We need to make sure that if the stream happens to be in the middle of handling
-        //      on another thread and comes back from there, that it doesn't ever do anything.
-        //      It may be that the Http2Stream is reused, and by the time the handler
-        //      comes back, it finds that the Http2Stream has been reused and in a
-        //      half-closed state ready for a response! We need to cancel that job and make
-        //      sure it never comes back (back to the Future!!)
-        connection.close(streamId);
-        streamId = -1;
-        connection = null;
+            // Shut down the stream
+            terminate();
+        }
     }
 
     // =================================================================================================================
-    // Methods for handling different types of frames. These are called by the connection
+    // Methods called by other members of the package
 
-    void handleHeadersFrame(final HeadersFrame headersFrame) {
-        // Set the request id, and get all the header data decoded, and so forth.
-        streamId = headersFrame.getStreamId();
+    /**
+     * Updates the flow control credits by some delta.
+     *
+     * @param delta The delta to apply to the flow control credits.
+     */
+    void updateFlowControlCredits(long delta) {
+        streamWindowCredits.addAndGet((int) delta);
+    }
 
-        // SPEC: 5.1 Stream States
-        // Sending a HEADERS frame as a client, or receiving a HEADERS frame as a server, causes the stream to
-        // become "open"
-        if (state == State.IDLE) {
-            state = State.OPEN;
+    /**
+     * Called by the {@link Http2Connection} to handle a headers frame. It has already been validated
+     * for internal consistency and for any connection-level checks. This method must perform additional
+     * stream-level validation and application of the header frame.
+     *
+     * @param frame The frame. Must not be null.
+     */
+    void handleHeadersFrame(final HeadersFrame frame) {
+        assert frame.getStreamId() == streamId :
+                "Stream ID Mismatch! Expected=" + streamId + ". Was=" + frame.getStreamId();
+
+        try {
+            // TODO An endpoint receiving HEADERS, PUSH_PROMISE, or CONTINUATION frames needs to reassemble field blocks and perform
+            //      decompression even if the frames are to be discarded. A receiver MUST terminate the connection with a connection
+            //      error (Section 5.4.1) of type COMPRESSION_ERROR if it does not decompress a field block.
+
+            // SPEC: 5.1 Stream States (half-closed (remote))
+            // If an endpoint receives additional frames, other than WINDOW_UPDATE, PRIORITY, or RST_STREAM, for a
+            // stream that is in this state, it MUST respond with a stream error (Section 5.4.2)
+            // of type STREAM_CLOSED.
+            assert state != State.CLOSED : "Closed stream received a HEADERS frame. StreamId=" + streamId;
+            if (state == State.HALF_CLOSED) {
+                throw new Http2Exception(Http2ErrorCode.STREAM_CLOSED, frame.getStreamId());
+            }
+
+            // SPEC: 5.1 Stream States
+            // Sending a HEADERS frame as a client, or receiving a HEADERS frame as a server, causes the stream to
+            // become "open"
+            assert state != State.CLOSED : "Closed stream. StreamId=" + streamId;
+            if (state == State.IDLE) {
+                state = State.OPEN;
+            }
+
+            // Append header data
+            final var blockLength = frame.getBlockLength();
+            if (blockLength > 0) {
+                webRequest.appendHeaderBlockData(frame.getFieldBlockFragment(), blockLength);
+            }
+
+            // If this is the end of the headers, then process them
+            if (frame.isEndHeaders()) {
+                webRequest.parseHeaders();
+            }
+
+            // SPEC: 5.1 Stream States (idle)
+            // The same HEADERS frame can also cause a stream to immediately become "half-closed".
+            if (frame.isEndStream()) {
+                state = State.HALF_CLOSED;
+                submittedJob = dispatcher.dispatch(webRequest, webResponse);
+            }
+        } catch (Http2Exception streamException) {
+            onStreamException(streamException);
+        }
+    }
+
+    /**
+     * Called by the {@link Http2Connection} to handle a CONTINUATION frame. It has already been validated
+     * for internal consistency and for any connection-level checks. This method must perform additional
+     * stream-level validation and application of the CONTINUATION frame.
+     *
+     * @param frame The frame. Must not be null.
+     */
+    void handleContinuationFrame(final ContinuationFrame frame) {
+        assert frame.getStreamId() == streamId :
+                "Stream ID Mismatch! Expected=" + streamId + ". Was=" + frame.getStreamId();
+
+        try {
+            // TODO An endpoint receiving HEADERS, PUSH_PROMISE, or CONTINUATION frames needs to reassemble field blocks and perform
+            //      decompression even if the frames are to be discarded. A receiver MUST terminate the connection with a connection
+            //      error (Section 5.4.1) of type COMPRESSION_ERROR if it does not decompress a field block.
+
+            // SPEC: 5.1 Stream States
+            // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
+            // connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+            if (state == State.IDLE) {
+                throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+            }
+
+            // SPEC: 5.1 Stream States (half-closed (remote))
+            // If an endpoint receives additional frames, other than WINDOW_UPDATE, PRIORITY, or RST_STREAM, for a
+            // stream that is in this state, it MUST respond with a stream error (Section 5.4.2)
+            // of type STREAM_CLOSED.
+            assert state != State.CLOSED : "Closed stream. StreamId=" + streamId;
+            if (state == State.HALF_CLOSED) {
+                throw new Http2Exception(Http2ErrorCode.STREAM_CLOSED, frame.getStreamId());
+            }
+
+            // Append header data
+            final var blockLength = frame.getBlockLength();
+            if (blockLength > 0) {
+                webRequest.appendHeaderBlockData(frame.getFieldBlockFragment(), blockLength);
+            }
+
+            // If this is the end of the headers, then process them
+            if (frame.isEndHeaders()) {
+                webRequest.parseHeaders();
+            }
+        } catch (Http2Exception streamException) {
+            onStreamException(streamException);
+        }
+    }
+
+    /**
+     * Called by the {@link Http2Connection} to handle a DATA frame. It has already been validated
+     * for internal consistency and for any connection-level checks. This method must perform additional
+     * stream-level validation and application of the DATA frame.
+     *
+     * @param frame The frame. Must not be null.
+     */
+    void handleDataFrame(final DataFrame frame) {
+        assert streamId == -1 || frame.getStreamId() == streamId :
+                "Stream ID Mismatch! Expected=" + streamId + ". Was=" + frame.getStreamId();
+
+        try {
+            // SPEC: 5.1 Stream States
+            // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
+            // connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+            if (state == State.IDLE) {
+                throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, frame.getStreamId());
+            }
+
+            // SPEC: 5.1 Stream States (half-closed (remote))
+            // If an endpoint receives additional frames, other than WINDOW_UPDATE, PRIORITY, or RST_STREAM, for a
+            // stream that is in this state, it MUST respond with a stream error (Section 5.4.2)
+            // of type STREAM_CLOSED.
+            assert state != State.CLOSED : "Closed stream. StreamId=" + streamId;
+            if (state == State.HALF_CLOSED) {
+                throw new Http2Exception(Http2ErrorCode.STREAM_CLOSED, frame.getStreamId());
+            }
+
+            // NOTE: We do not bother with sending the client any "window update frames" for the data
+            // we receive, because we know that the entire request (plus some!) can fit into the default
+            // window, so we don't bother allowing the client to send yet more data!
+
+            // Give the web request the new data
+            final var dataLength = frame.getDataLength();
+            webRequest.appendRequestBodyData(frame.getData(), dataLength);
+
+            // If this is the last frame of data, then initiate the request!
+            if (frame.isEndStream()) {
+                state = State.HALF_CLOSED;
+                submittedJob = dispatcher.dispatch(webRequest, webResponse);
+            }
+        } catch (Http2Exception streamException) {
+            onStreamException(streamException);
+        }
+    }
+
+    /**
+     * Called by the {@link Http2Connection} to handle an RST_STREAM frame. It has already been validated
+     * for internal consistency and for any connection-level checks. This method must perform additional
+     * stream-level validation and application of the RST_STREAM frame. This type of frame is sent from
+     * the client when it wants to prematurely terminate the request.
+     *
+     * @param frame The frame. Must not be null.
+     */
+    void handleRstStreamFrame(final RstStreamFrame frame) {
+        assert frame.getStreamId() == streamId :
+                "Stream ID Mismatch! Expected=" + streamId + ". Was=" + frame.getStreamId();
+
+        try {
+            // SPEC: 5.1 Stream States
+            // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
+            // connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+            assert state != State.CLOSED : "Closed stream. StreamId=" + streamId;
+            if (state == State.IDLE) {
+                throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+            }
+
+            // SPEC: 5.1 Stream States
+            // Either endpoint can send a RST_STREAM frame from this [OPEN] state, causing it to transition
+            // immediately to "closed".
+            if (state == State.OPEN || state == State.HALF_CLOSED) {
+                terminate();
+            }
+        } catch (Http2Exception streamException) {
+            onStreamException(streamException);
+        }
+    }
+
+    /**
+     * Called by the {@link Http2Connection} to handle a WINDOW_UPDATE frame. It has already been validated
+     * for internal consistency and for any connection-level checks. This method must perform additional
+     * stream-level validation and application of the WINDOW_UPDATE frame.
+     *
+     * @param frame The frame. Must not be null.
+     */
+    void handleWindowUpdateFrame(final WindowUpdateFrame frame) {
+        assert frame.getStreamId() == streamId :
+                "Stream ID Mismatch! Expected=" + streamId + ". Was=" + frame.getStreamId();
+
+        try {
+            // SPEC: 5.1 Stream States
+            // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
+            // connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+            assert state != State.CLOSED : "Closed stream. StreamId=" + streamId;
+            if (state == State.IDLE) {
+                throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+            }
+
+            // SPEC 6.9.1
+            // A sender MUST NOT allow a flow-control window to exceed 231-1 octets. If a sender receives a WINDOW_UPDATE
+            // that causes a flow-control window to exceed this maximum, it MUST terminate either the stream or the
+            // connection, as appropriate. For streams, the sender sends a RST_STREAM with an error code of
+            // FLOW_CONTROL_ERROR; for the connection, a GOAWAY frame with an error code of FLOW_CONTROL_ERROR is sent.
+            final var increment = frame.getWindowSizeIncrement();
+            final long credits = streamWindowCredits.get();
+            final var wouldOverflow = credits + increment > Settings.MAX_FLOW_CONTROL_WINDOW_SIZE;
+            if (wouldOverflow) {
+                throw new Http2Exception(Http2ErrorCode.FLOW_CONTROL_ERROR, streamId);
+            }
+
+            updateFlowControlCredits(increment);
+        } catch (Http2Exception streamException) {
+            onStreamException(streamException);
+        }
+    }
+
+    /**
+     * Called by the {@link Http2Connection} to handle a PRIORITY frame. It has already been validated
+     * for internal consistency and for any connection-level checks. This method must perform additional
+     * stream-level validation and application of the PRIORITY frame.
+     *
+     * @param priorityFrame The frame. Must not be null.
+     */
+    void handlePriorityFrame(final PriorityFrame priorityFrame) {
+        assert state != State.CLOSED : "Closed stream. StreamId=" + streamId;
+        // TODO I don't support this, but if I get one, does the stream become open?
+        // If I get priority followed by headers, does it become half-closed?
+
+        // Sending or receiving a PRIORITY frame does not affect the state of any stream (Section 5.1). The PRIORITY frame can be sent on a stream in any state, including "idle" or "closed". A PRIORITY frame cannot be sent between consecutive frames that comprise a single field block (Section 4.3).
+    }
+
+    /**
+     * Represents an HTTP/2 {@link WebRequest}. A single instance exists per {@link Http2Stream} instance,
+     * and is reused.
+     */
+    private final class Http2WebRequest implements WebRequest {
+        /**
+         * The request headers. This instance is reused between requests. After we read all the header data,
+         * we parse it and set the headers in the {@link Http2Headers} instance.
+         */
+        private final Http2Headers requestHeaders = new Http2Headers();
+
+        /**
+         * The request body array.
+         *
+         * <p>At first, we place the compressed header data into this buffer, and then after decoding the headers
+         * and storing them in {@link #requestHeaders}, we reset the stream and use it for storing the request
+         * body data.
+         */
+        private final byte[] requestBody;
+
+        /**
+         * The number of used bytes in the {@link #requestBody}.
+         */
+        private int requestBodyLength = 0;
+
+        /**
+         * A reusable {@link java.io.InputStream} that we use for passing to the handler the request body stream.
+         */
+        private final ReusableByteArrayInputStream requestBodyInputStream;
+
+        /**
+         * Create a new instance.
+         *
+         * @param numBytes The size of the request body buffer. No requests can exceed this size.
+         */
+        Http2WebRequest(int numBytes) {
+            this.requestBody = new byte[numBytes];
+            this.requestBodyInputStream = new ReusableByteArrayInputStream(requestBody);
         }
 
-        // TODO If I am already open, does the same headers frame cause me to go half-closed?
-        // The same HEADERS frame can also cause a stream to immediately become "half-closed".
+        /**
+         * Called to re-initialize the request.
+         */
+        void init() {
+            this.requestBodyLength = 0;
+            this.requestHeaders.clear();
+            this.requestBodyInputStream.reuse(0);
+        }
 
-        if (headersFrame.isEndHeaders() && headersFrame.getBlockLength() > 0) {
-            // I have all the bytes I will need... so I can go and decode them
+        /**
+         * Appends a block of compressed header data.
+         *
+         * @param fieldBlockFragment The field block fragment. Cannot be null.
+         * @param blockLength The number of bytes in the array that are meaningful. Must be non-negative.
+         */
+        void appendHeaderBlockData(byte[] fieldBlockFragment, int blockLength) {
+            System.arraycopy(fieldBlockFragment, 0, requestBody, requestBodyLength, blockLength);
+            webRequest.requestBodyLength += blockLength;
+        }
+
+        /**
+         * Signals the end of header fragment data accumulation. Parses the header data, populates the
+         * {@link #requestHeaders}, and resets the {@link #requestBodyLength}.
+         */
+        void parseHeaders() {
             try {
                 final var codec = connection.getHeaderCodec();
-                codec.decode(requestHeaders, new ByteArrayInputStream(headersFrame.getFieldBlockFragment(), 0, headersFrame.getBlockLength()));
-                method = requestHeaders.getMethod();
-                path = requestHeaders.getPath();
+                requestBodyInputStream.length(requestBodyLength);
+                codec.decode(requestHeaders, requestBodyInputStream);
+                requestBodyLength = 0;
             } catch (IOException ex) {
                 // SPEC: 4.3 Field Section Compression and Decompression
                 // A decoding error in a field block MUST be treated as a connection error (Section 5.4.1) of type
@@ -210,165 +514,188 @@ public final class Http2Stream extends RequestContext {
             }
         }
 
-        // It is possible the entire request was just a HEADERS frame, in which case
-        // we can transition directly to respond mode (HALF_CLOSED).
-        if (headersFrame.isEndStream()) {
-            state = State.HALF_CLOSED;
-            dispatcher.dispatch(this, webResponse);
-        }
-    }
-
-    void handleDataFrame(final DataFrame dataFrame) {
-        // SPEC: 5.1 Stream States
-        // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
-        // connection error (Section 5.4.1) of type PROTOCOL_ERROR.
-        if (state == State.IDLE) {
-            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, dataFrame.getStreamId());
-        }
-
-        /*
-            DATA frames are subject to flow control and can only be sent when a stream is in the "open" or
-            "half-closed (remote)" state. The entire DATA frame payload is included in flow control, including the
-            Pad Length and Padding fields if present. If a DATA frame is received whose stream is not in the "open" or
-            "half-closed (local)" state, the recipient MUST respond with a stream error (Section 5.4.2) of type
-            STREAM_CLOSED.
+        /**
+         * Appends request body data to the array.
+         *
+         * @param data A non-null array of bytes to append
+         * @param length The number of meaningful bytes. Must be non-negative.
          */
-    }
-
-    void handlePriorityFrame(final PriorityFrame priorityFrame) {
-        // TODO I don't support this, but if I get one, does the stream become open?
-        // If I get priority followed by headers, does it become half-closed?
-
-        // Sending or receiving a PRIORITY frame does not affect the state of any stream (Section 5.1). The PRIORITY frame can be sent on a stream in any state, including "idle" or "closed". A PRIORITY frame cannot be sent between consecutive frames that comprise a single field block (Section 4.3).
-    }
-
-    void handleRstStreamFrame(final RstStreamFrame rstStreamFrame) {
-        final int streamId = rstStreamFrame.getStreamId();
-        final var errorCode = rstStreamFrame.getErrorCode();
-
-        // SPEC: 5.1 Stream States
-        // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
-        // connection error (Section 5.4.1) of type PROTOCOL_ERROR.
-        if (state == State.IDLE) {
-            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+        void appendRequestBodyData(byte[] data, int length) {
+            System.arraycopy(data, 0, requestBody, requestBodyLength, length);
+            requestBodyLength += length;
         }
 
-        if (state == State.OPEN || state == State.HALF_CLOSED) {
-            state = State.CLOSED;
+        // =================================================================================================================
+        // WebRequest Methods
+
+        @Override
+        public WebHeaders getRequestHeaders() {
+            return requestHeaders;
         }
 
-        // SPEC: 5.1 Stream States
-        // Either endpoint can send a RST_STREAM frame from this [OPEN] state, causing it to transition immediately to
-        // "closed".
-        System.out.println("RST_STREAM: " + errorCode.name());
-        close();
-    }
-
-    void handlePushPromiseFrame(final int streamId) {
-        // SPEC: 5.1 Stream States
-        // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
-        // connection error (Section 5.4.1) of type PROTOCOL_ERROR.
-        if (state == State.IDLE) {
-            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+        @Override
+        public InputStream getRequestBody() {
+            requestBodyInputStream.length(requestBodyLength);
+            return requestBodyInputStream;
         }
 
-    }
-
-    void handleWindowUpdateFrame(final WindowUpdateFrame windowUpdateFrame) {
-        // SPEC: 5.1 Stream States
-        // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
-        // connection error (Section 5.4.1) of type PROTOCOL_ERROR.
-        if (state == State.IDLE) {
-            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+        @Override
+        public String getMethod() {
+            return requestHeaders.getPseudoHeader(":method");
         }
 
-    }
-
-    void handleContinuationFrame(final ContinuationFrame continuationFrame) {
-        // SPEC: 5.1 Stream States
-        // Receiving any frame other than HEADERS or PRIORITY on a stream in [IDLE] state MUST be treated as a
-        // connection error (Section 5.4.1) of type PROTOCOL_ERROR.
-        if (state == State.IDLE) {
-            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+        @Override
+        public String getPath() {
+            return requestHeaders.getPseudoHeader(":path");
         }
 
-//        if (!headerContinuation) {
-//            // TODO throw exception because we should have seen a HEADERS frame or a continuation frame
-//            //      without END_HEADERS to be here
-//        }
-//
-//        if (continuationFrame.isEndHeaders()) {
-//            headerContinuation = false;
-//        }
-
+        @Override
+        public HttpVersion getVersion() {
+            return version;
+        }
     }
 
-    /*
-     * We initialize the first 9 bytes of the buffer with
-     * the DATA_FRAME header information, with some empty bytes for things like the length. Then
-     * we allow the response output stream to fill up the remaining bytes in the buffer. If the
-     * request terminates before the buffer is totally full, we fill in the length and other flags
-     * in the header section and send this off to the
+    /**
+     * An implementation of an HTTP/2 {@link WebResponse}. A single instance exists per {@link Http2Stream} instance,
+     * and is reused.
      */
+    private final class Http2WebResponse implements WebResponse {
+        /**
+         * Holds the response headers
+         */
+        private final Http2Headers responseHeaders = new Http2Headers();
 
-    /*
-    From this state, either endpoint can send a frame with an END_STREAM flag set, which causes the stream to
-    transition into one of the "half-closed" states. An endpoint sending an END_STREAM flag causes the stream state to
-    become "half-closed (local)"; an endpoint receiving an END_STREAM flag causes the stream state to become
-    "half-closed (remote)".
+        /**
+         * All response body content is sent to this buffer. We don't need to keep all the response
+         * data, only enough to send a frame to the client at a time.
+         */
+        private final OutputBufferOutputStream responseBuffer = new OutputBufferOutputStream();
 
-    Either endpoint can send a RST_STREAM frame from this state, causing it to transition immediately to "closed".
-     */
+        /**
+         * A {@link HeadersFrame} that can be reused for responding with header data. The byte[] within
+         * the headers frame is large enough to hold the compressed headers.
+         */
+        private final HeadersFrame responseHeadersFrame = new HeadersFrame();
 
-    // TODO: To implement this, I need to process PUSH_PROMISE and CONTINUATION and make sure I always
-    //       decompress the contents!!
-    // An endpoint receiving HEADERS, PUSH_PROMISE, or CONTINUATION frames needs to reassemble field blocks and perform
-    // decompression even if the frames are to be discarded. A receiver MUST terminate the connection with a connection
-    // error (Section 5.4.1) of type COMPRESSION_ERROR if it does not decompress a field block.
+        /**
+         * This reusable output stream will write compressed header data into the {@link #responseHeadersFrame}.
+         */
+        private final ReusableByteArrayOutputStream compressedHeaderStream =
+                new ReusableByteArrayOutputStream(responseHeadersFrame.getFieldBlockFragment());
 
-    private void sendHeadersFrame(final Http2Headers responseHeaders, boolean endOfStream) throws IOException {
-        if (state == State.HALF_CLOSED) {
-            // Encode the headers into a packed, compressed set of bytes, and write them to the buffer.
-            final var arrays = new ReusableByteArrayOutputStream(responseHeadersFrame.getFieldBlockFragment());
-            final var length = connection.getHeaderCodec().encode(responseHeaders, arrays);
+        /**
+         * True after headers have been sent.
+         */
+        private boolean headersSent = false;
 
-            // Now we have an actual length, we can go back and edit a few bytes of the header with the length
-            responseHeadersFrame
-                    .setStreamId(streamId)
-                    .setEndHeaders(true)
-                    .setEndStream(endOfStream)
-                    .setBlockLength(length);
+        /**
+         * This flag is used to determine whether the response has already been closed.
+         */
+        private boolean closed = false;
 
-            final var buf = connection.getOutputBuffer();
-            responseHeadersFrame.write(buf);
-            connection.sendOutput(buf);
+        /**
+         * Create a new instance.
+         */
+        Http2WebResponse() {
         }
-    }
 
-    private void sendWindowUpdateFrame() {
-        if (state == State.OPEN || state == State.HALF_CLOSED) {
-            // Can send
-            // TODO If send "end of stream", transition to HALF_CLOSED
+        void init() {
+            this.responseHeaders.clear();
+            this.responseBuffer.reset();
+            this.responseHeadersFrame.reset();
+            this.closed = false;
+            this.headersSent = false;
         }
-    }
 
-    private void sendPriorityFrame() {
-        if (state == State.OPEN || state == State.HALF_CLOSED) {
-            // Can send
-            // TODO If send "end of stream", transition to HALF_CLOSED
+        // =================================================================================================================
+        // WebRequest Methods
+
+        @Override
+        public WebHeaders getHeaders() {
+            return responseHeaders;
         }
-    }
 
-    private void sendRstStreamFrame() {
-        if (state == State.OPEN || state == State.HALF_CLOSED) {
-            // Can send
-            // Spec: 5.1 Stream States
-            // Either endpoint can send a RST_STREAM frame from this state, causing it to transition immediately to
-            // "closed".
-            state = State.CLOSED;
-            final var buf = connection.getOutputBuffer();
-            responseRstStreamFrame.setStreamId(streamId).setErrorCode(Http2ErrorCode.NO_ERROR).write(buf);
-            connection.sendOutput(buf);
+        @Override
+        public WebResponse statusCode(StatusCode code) {
+            responseHeaders.putStatus(code);
+            return this;
+        }
+
+        @Override
+        public void respond(StatusCode code) {
+            statusCode(code);
+            close();
+        }
+
+        @Override
+        public void respond(String contentType, String bodyAsString, Charset charset) {
+            if (bodyAsString != null) {
+                respond(contentType, bodyAsString.getBytes(charset));
+            }
+            close();
+        }
+
+        @Override
+        public void respond(String contentType, byte[] bodyAsBytes)  {
+            contentType(contentType);
+            if (bodyAsBytes != null && bodyAsBytes.length > 0) {
+                responseBuffer.write(bodyAsBytes, 0, bodyAsBytes.length);
+            }
+            close();
+        }
+
+
+        @Override
+        public OutputStream respond(String contentType) throws IOException {
+            contentType(contentType);
+            return responseBuffer;
+        }
+
+        @Override
+        public OutputStream respond(String contentType, int contentLength) throws IOException {
+            contentType(contentType);
+            // TODO what should I do with contentLength?
+            return responseBuffer;
+        }
+
+        @Override
+        public void close() {
+            // Do nothing if close has already been called on this response. Only respond
+            // when the stream is in the HALF_CLOSED state.
+            if (!closed && state == State.HALF_CLOSED) {
+                try {
+                    // Encode the headers into a packed, compressed set of bytes, and write them to the buffer.
+                    final var length = connection.getHeaderCodec().encode(responseHeaders, compressedHeaderStream);
+
+                    // Now we have an actual length, we can go back and edit a few bytes of the header with the length
+                    responseHeadersFrame
+                            .setStreamId(streamId)
+                            .setEndHeaders(true)
+                            .setEndStream(responseBuffer.currentBuffer.size() == 0)
+                            .setBlockLength(length);
+
+                    // Send the header frame
+                    final var buf = connection.getOutputBuffer();
+                    responseHeadersFrame.write(buf);
+                    connection.sendOutput(buf);
+                    responseBuffer.sendRequestOutputBufferContentsAsLastFrame();
+                } catch (IOException encodeException) {
+                    encodeException.printStackTrace();
+                    final var streamException = new Http2Exception(Http2ErrorCode.INTERNAL_ERROR, streamId);
+                    onStreamException(streamException);
+                }
+
+                responseBuffer.sendRequestOutputBufferContentsAsLastFrame();
+                closed = true;
+                terminate();
+
+                // TODO We need to make sure that if the stream happens to be in the middle of handling
+                //      on another thread and comes back from there, that it doesn't ever do anything.
+                //      It may be that the Http2Stream is reused, and by the time the handler
+                //      comes back, it finds that the Http2Stream has been reused and in a
+                //      half-closed state ready for a response! We need to cancel that job and make
+                //      sure it never comes back (back to the Future!!)
+            }
         }
     }
 
@@ -389,8 +716,6 @@ public final class Http2Stream extends RequestContext {
 
         private void sendRequestOutputBufferContentsAsFrame() {
             submitFrame(false);
-            checkoutBuffer();
-            Frame.writeHeader(currentBuffer, 0, FrameType.CONTINUATION, (byte) 0, streamId);
         }
 
         private void sendRequestOutputBufferContentsAsLastFrame() {
@@ -401,17 +726,81 @@ public final class Http2Stream extends RequestContext {
             currentBuffer = connection.getOutputBuffer();
             currentBuffer.setOnDataFullCallback(this::sendRequestOutputBufferContentsAsLastFrame);
             currentBuffer.setOnCloseCallback(this::sendRequestOutputBufferContentsAsFrame);
+            currentBuffer.reset();
         }
 
         private void submitFrame(boolean endOfStream) {
-            final var size = currentBuffer.size();
-            currentBuffer.position(0);
-            currentBuffer.write24BitInteger(size - Frame.FRAME_HEADER_SIZE);
-            currentBuffer.position(4);
-            currentBuffer.writeByte(endOfStream ? 1 : 0);
-            currentBuffer.position(size);
-            connection.sendOutput(currentBuffer);
-            currentBuffer = null;
+            // The primary complication of this method is in dealing with flow control windows. There
+            // are two windows we have to pay attention to -- the per-connection window and the
+            // per-stream window. So we have a lock given to us from the connection which we can use
+            // to lock around these flow control things (including creating a mutual exclusion lock
+            // between streams sending data and the connection handling new settings and new window
+            // update frames).
+            //
+            // It is possible that we will have more data to send than can be sent in a single data frame.
+            // So we will use a loop and keep sending frames from this stream's thread until all the
+            // data is sent. This means that the application's "handler" thread will block until
+            // all these frames finally make their way to the client.
+            //
+            // For each iteration, we figure out the maximum amount of data we can send, and adjust
+            // the flow control credits accordingly (on both the stream and the connection), and then
+            // release the lock so others have a chance to try to send data.
+            //
+            // Unfortunately, if we cannot send all the data in one go, we will need to make buffer
+            // copies, because once we send a buffer to the connection, it's lifecycle is out of
+            // our hands.
+            boolean allDataSent = false;
+            while (!allDataSent && state != State.CLOSED) {
+                connection.getFlowControlLock().lock();
+                try {
+                    // Check both the connection window credits and the stream credits to compute how
+                    // much maximum data we can send to the client.
+                    final var connectionWindowCredits = connection.getFlowControlCredits();
+                    final var maxDataSizeInWindow = Math.min(connectionWindowCredits.get(), streamWindowCredits.get());
+
+                    // If we cannot send any data to the client, then wait until later.
+                    if (maxDataSizeInWindow > 0) {
+                        // Compute the actual amount of data we will send
+                        final var bufferToSend = currentBuffer;
+                        final var dataLengthToSend = Math.min(maxDataSizeInWindow, bufferToSend.size());
+                        final var bufferDataLength = bufferToSend.size();
+
+                        // If we cannot send all the data, then get a new buffer and copy all the data
+                        // we couldn't send, into the new buffer
+                        checkoutBuffer();
+                        Frame.writeHeader(currentBuffer, 0, FrameType.DATA, (byte) 0, streamId);
+                        if (dataLengthToSend < bufferDataLength) {
+                            bufferToSend.position(Frame.FRAME_HEADER_SIZE + dataLengthToSend);
+                            currentBuffer.write(bufferToSend);
+                            bufferToSend.getBuffer().limit(Frame.FRAME_HEADER_SIZE + dataLengthToSend);
+                        } else {
+                            allDataSent = true;
+                        }
+
+                        // Now write out the data frame. Put the length in.
+                        bufferToSend.position(0);
+                        bufferToSend.write24BitInteger(dataLengthToSend);
+                        bufferToSend.position(4);
+                        bufferToSend.writeByte(endOfStream ? 1 : 0);
+                        bufferToSend.position(Frame.FRAME_HEADER_SIZE + dataLengthToSend);
+                        streamWindowCredits.addAndGet(-dataLengthToSend);
+                        connectionWindowCredits.addAndGet(-dataLengthToSend);
+                        connection.sendOutput(bufferToSend);
+                    }
+                } finally {
+                    connection.getFlowControlLock().unlock();
+                }
+
+                if (!allDataSent) {
+                    try {
+                        Thread.sleep(10);
+                    } catch (InterruptedException ignored) {
+                        // If we were interrupted, then quite likely the thread is being terminated.
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+            }
         }
 
         @Override
@@ -424,4 +813,5 @@ public final class Http2Stream extends RequestContext {
             currentBuffer.write(b, off, len);
         }
     }
+
 }

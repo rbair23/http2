@@ -11,7 +11,7 @@ class DataFrameSpecTest extends SpecTest {
     @BeforeEach
     void setUp() throws IOException {
         super.setUp();
-        client.initializeConnection();
+//        client.initializeConnection();
     }
 
     // SPEC 6.1

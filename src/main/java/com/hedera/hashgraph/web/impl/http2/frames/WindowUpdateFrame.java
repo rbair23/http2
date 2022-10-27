@@ -3,6 +3,7 @@ package com.hedera.hashgraph.web.impl.http2.frames;
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Exception;
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
+import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
 /**
  * An implementation for WINDOW_UPDATE frame types.
@@ -108,5 +109,14 @@ public final class WindowUpdateFrame extends Frame {
         if (windowSizeIncrement == 0) {
             throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
         }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void write(final OutputBuffer out) {
+        super.write(out);
+        out.write32BitInteger(windowSizeIncrement);
     }
 }

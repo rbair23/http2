@@ -35,6 +35,12 @@ public final class HeadersFrame extends HeadersFrameBase {
         setEndStream(endStream);
     }
 
+    public HeadersFrame reset() {
+        return setEndStream(false)
+                .setBlockLength(0)
+                .setEndHeaders(false);
+    }
+
     /**
      * Sets the stream ID
      *
@@ -121,13 +127,22 @@ public final class HeadersFrame extends HeadersFrameBase {
 
         // Get the padLength, if present.
         final var padLength = paddedFlag ? in.readByte() : 0;
+        if (padLength >= getPayloadLength()) {
+            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+        }
 
         // If the priority flag is set, then the "exclusive", "streamDependency", and "weight"
         // fields will be present. The "exclusive" and "streamDependency" fields are part of a single
         // 32-bit integer, while the weight is a byte. But these fields are deprecated, and we don't
-        // care about them, so we will just skip those 5 bytes.
+        // care about them. Unfortunately, the old spec (which our test suite covers) requires that
+        // we check for a header that depends on itself. So we will have to read this data.
         if (priorityFlag) {
-            in.skip(5);
+            final var twoFields = in.peek32BitInteger();
+            final var streamDependency = twoFields & 0x7FFFFFFF;
+            if (streamDependency == streamId) {
+                throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+            }
+            in.skip(1);
         }
 
         // Compute the number of bytes that are part of the payload that are part of the block length,

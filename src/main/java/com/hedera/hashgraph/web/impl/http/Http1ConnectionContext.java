@@ -183,6 +183,7 @@ public class Http1ConnectionContext extends ConnectionContext {
 //                                System.out.println("----- "+requestContext.getMethod()+"  "+requestContext.getPath()+"  "+requestContext.getVersion());
                         } catch (Exception e) {
                             closeWithError(StatusCode.HTTP_VERSION_NOT_SUPPORTED_505);
+                            return;
                         }
                     }
                     break;
@@ -196,6 +197,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                         }
                         // full preface read, now hand over to http 2 handler
                         onConnectionUpgrade.accept(HttpVersion.HTTP_2);
+                        return;
                     }
                     break;
                 case HEADER_KEY:

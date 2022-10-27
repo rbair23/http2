@@ -85,16 +85,6 @@ public abstract class Frame {
     }
 
     /**
-     * Gets the total length of the entire frame, including the header section and the payload section,
-     * in bytes.
-     *
-     * @return The total length of the frame in bytes. This will always be a value 9 or greater.
-     */
-    public final int getFrameLength() {
-        return FRAME_HEADER_SIZE + getPayloadLength();
-    }
-
-    /**
      * Gets the length of the payload section of this frame, in bytes.
      *
      * @return The length of the payload section. This is always non-negative.
@@ -315,5 +305,15 @@ public abstract class Frame {
         final var id = in.read31BitInteger();
         in.resetToMark();
         return id;
+    }
+
+    @Override
+    public String toString() {
+        return "Frame{" +
+                "payloadLength=" + payloadLength +
+                ", type=" + type +
+                ", flags=" + flags +
+                ", streamId=" + streamId +
+                '}';
     }
 }

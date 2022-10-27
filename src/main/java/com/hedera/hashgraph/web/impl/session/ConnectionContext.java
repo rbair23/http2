@@ -2,6 +2,8 @@ package com.hedera.hashgraph.web.impl.session;
 
 import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.impl.ChannelManager;
+import com.hedera.hashgraph.web.impl.http2.frames.FrameType;
+import com.hedera.hashgraph.web.impl.http2.frames.Settings;
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
@@ -97,7 +99,7 @@ public abstract class ConnectionContext implements AutoCloseable {
             doHandle(onConnectionUpgrade);
         } catch (Exception e) {
             // The underlying channel is closed, we need to clean things up
-            e.printStackTrace(); // LOGGING: Need to log this, maybe as trace or debug
+//            e.printStackTrace(); // LOGGING: Need to log this, maybe as trace or debug
             // TODO should we be sending a 500 response?
             terminate();
         }

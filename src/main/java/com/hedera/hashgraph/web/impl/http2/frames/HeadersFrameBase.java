@@ -2,6 +2,7 @@ package com.hedera.hashgraph.web.impl.http2.frames;
 
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /**
@@ -125,5 +126,13 @@ public abstract class HeadersFrameBase extends Frame {
 
         // Read the data into the data buffer for this frame
         in.readBytes(this.fieldBlockFragment, 0, blockLength);
+    }
+
+    @Override
+    public String toString() {
+        return "HeadersFrameBase{" +
+                "fieldBlockFragment=" + Arrays.toString(fieldBlockFragment) +
+                ", blockLength=" + blockLength +
+                "} " + super.toString();
     }
 }

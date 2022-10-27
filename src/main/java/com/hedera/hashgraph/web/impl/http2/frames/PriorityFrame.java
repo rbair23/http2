@@ -23,6 +23,10 @@ public final class PriorityFrame extends Frame {
      */
     private static final int PAYLOAD_LENGTH = 5;
 
+    private int streamDependency;
+    private boolean exclusive;
+    private int weight;
+
     /**
      * Create a new instance.
      */
@@ -34,10 +38,26 @@ public final class PriorityFrame extends Frame {
     /**
      * Create a new instance.
      *
-     * @param streamId      The stream id must be non-negative.
+     * @param streamId The stream id must be non-negative.
      */
     public PriorityFrame(int streamId) {
         super(PAYLOAD_LENGTH, FrameType.PRIORITY, (byte) 0, streamId);
+    }
+
+    public PriorityFrame(int streamId, int streamDep, boolean exclusive, int weight) {
+        this(streamId);
+
+        if (streamDep < 0) {
+            throw new IllegalArgumentException("Stream Dependency is 31 bits");
+        }
+
+        if (weight > 255) {
+            throw new IllegalArgumentException("Weight is a byte");
+        }
+
+        this.streamDependency = streamDep;
+        this.exclusive = exclusive;
+        this.weight = weight;
     }
 
     /**
@@ -75,6 +95,15 @@ public final class PriorityFrame extends Frame {
         }
 
         // Skip the payload data. We don't need it.
+        // TODO I do have it now for testing at least, might as well handle it...
         in.skip(PAYLOAD_LENGTH);
+    }
+
+    @Override
+    public void write(OutputBuffer out) {
+        super.write(out);
+        final var i = exclusive ? 0x70000000 | streamDependency : streamDependency;
+        out.write32BitInteger(i);
+        out.write(weight);
     }
 }

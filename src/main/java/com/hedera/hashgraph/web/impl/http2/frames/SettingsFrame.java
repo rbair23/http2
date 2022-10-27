@@ -354,4 +354,16 @@ public final class SettingsFrame extends Frame {
         }
     }
 
+    @Override
+    public String toString() {
+        return "SettingsFrame{" +
+                "definedSettings=" + definedSettings +
+                ", headerTableSize=" + headerTableSize +
+                ", enablePush=" + enablePush +
+                ", maxConcurrentStreams=" + maxConcurrentStreams +
+                ", initialWindowSize=" + initialWindowSize +
+                ", maxFrameSize=" + maxFrameSize +
+                ", maxHeaderListSize=" + maxHeaderListSize +
+                '}';
+    }
 }

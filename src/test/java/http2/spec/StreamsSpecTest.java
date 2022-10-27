@@ -4,6 +4,7 @@ import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.frames.FrameType;
 import com.hedera.hashgraph.web.impl.http2.frames.GoAwayFrame;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -14,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * A series of tests for Section 5 of the specification, "Streams and Multiplexing".
  */
 @DisplayName("Section 5. Streams and Multiplexing")
+@Tag("5")
 class StreamsSpecTest extends SpecTest {
 
     // Sending a HEADERS frame as a client, or receiving a HEADERS frame as a server, causes the stream to become
@@ -89,36 +91,36 @@ class StreamsSpecTest extends SpecTest {
     //     - Also, with a streamId of 0!
     //     - Create a Header with a higher numbered ID and then create a Header with a lowered number ID
 
-    @Test
-    void headerWithStreamId0Fails() throws IOException {
-        // Initializes the connection.
-        client.initializeConnection();
-        client.submit(FrameType.HEADERS, (byte) 0b0000_0100, 0, null).sendAndReceive();
-        final var goAway = client.receive(GoAwayFrame.class);
-        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
-    }
-
-    @Test
-    void headerWithStreamIdEvenFails() throws IOException {
-        // Initializes the connection.
-        client.initializeConnection();
-        client.submitEmptyHeaders(2).sendAndReceive();
-        final var goAway = client.receive(GoAwayFrame.class);
-        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
-    }
-
-    // TODO I'm not sure this should actually fail. Just transitions to "closed" right away.
-    //      Does that mean a response comes back?
-    @Test
-    void headerWithLowerStreamIdFails() throws IOException {
-        // Initializes the connection.
-        client.initializeConnection();
-        client.submitEmptyHeaders(11).sendAndReceive();
-        assertFalse(client.framesReceived());
-        client.submitEmptyHeaders(3).sendAndReceive();
-        final var goAway = client.receive(GoAwayFrame.class);
-        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
-    }
+//    @Test
+//    void headerWithStreamId0Fails() throws IOException {
+//        // Initializes the connection.
+//        client.initializeConnection();
+//        client.submit(FrameType.HEADERS, (byte) 0b0000_0100, 0, null).sendAndReceive();
+//        final var goAway = client.receive(GoAwayFrame.class);
+//        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
+//    }
+//
+//    @Test
+//    void headerWithStreamIdEvenFails() throws IOException {
+//        // Initializes the connection.
+//        client.initializeConnection();
+//        client.submitEmptyHeaders(2).sendAndReceive();
+//        final var goAway = client.receive(GoAwayFrame.class);
+//        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
+//    }
+//
+//    // TODO I'm not sure this should actually fail. Just transitions to "closed" right away.
+//    //      Does that mean a response comes back?
+//    @Test
+//    void headerWithLowerStreamIdFails() throws IOException {
+//        // Initializes the connection.
+//        client.initializeConnection();
+//        client.submitEmptyHeaders(11).sendAndReceive();
+//        assertFalse(client.framesReceived());
+//        client.submitEmptyHeaders(3).sendAndReceive();
+//        final var goAway = client.receive(GoAwayFrame.class);
+//        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
+//    }
 
     // SPEC: 5.1.2 Stream Concurrency
     // A peer can limit the number of concurrently active streams using the SETTINGS_MAX_CONCURRENT_STREAMS

@@ -17,6 +17,8 @@ import java.io.IOException;
 import java.nio.channels.ByteChannel;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -153,7 +155,9 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      * Keeps track of the "credit", or number of bytes we can send to the client before we need
      * to receive "more credit" via a WINDOW_UPDATE frame.
      */
-    private int clientFlowControlCredits = 1 << 16;
+    private final AtomicInteger clientFlowControlCredits = new AtomicInteger(1 << 16);
+
+    private final ReentrantLock flowControlLock = new ReentrantLock();
 
     /**
      * A {@link ContinuationFrame} that can be reused for parsing continuation frame data
@@ -186,11 +190,6 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
     private final PriorityFrame priorityFrame = new PriorityFrame();
 
     /**
-     * A {@link RstStreamFrame} that can be reused for parsing reset frame data
-     */
-    private final RstStreamFrame rstStreamFrame = new RstStreamFrame();
-
-    /**
      * A {@link SettingsFrame} that can be reused for parsing SETTING frame data
      */
     private final SettingsFrame settingsFrame = new SettingsFrame();
@@ -201,13 +200,18 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
     private final WindowUpdateFrame windowUpdateFrame = new WindowUpdateFrame();
 
     /**
+     * A {@link RstStreamFrame} that can be reused for parsing reset frame data
+     */
+    private final RstStreamFrame rstStreamFrame = new RstStreamFrame();
+
+    /**
      * Create a new instance.
      *
      * @param contextReuseManager The {@link ContextReuseManager} that manages this instance. Must not be null.
      * @param config The {@link WebServerConfig} for this running server instance.
      */
     public Http2ConnectionImpl(final ContextReuseManager contextReuseManager, final WebServerConfig config) {
-        super(contextReuseManager, Settings.INITIAL_FRAME_SIZE);
+        super(contextReuseManager, Settings.INITIAL_FRAME_SIZE + Frame.FRAME_HEADER_SIZE);
 
         // Set up the server settings
         serverSettings.setMaxConcurrentStreams(config.maxConcurrentStreamsPerConnection());
@@ -234,11 +238,12 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         super.reset(channel, onCloseCallback);
         this.state = State.START;
         this.clientSettings.resetToDefaults();
-        this.streams.forEach((k, v) -> v.close());
+        // TODO Hmmmm.
+        this.streams.forEach((k, v) -> v.terminate());
         this.streams.clear();
         this.highestStreamId = 0;
         this.penaltyCount = 0;
-        this.clientFlowControlCredits = 1 << 16;
+        this.clientFlowControlCredits.set((1 << 16) - 1);
 
         // NOTE: "codec" is not reset because the first frame from the client is a Settings frame
         //       which will cause us to rebuild the codec if necessary, otherwise, we can just
@@ -267,7 +272,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // NOTE: May be called from any thread
         if (!isClosed()) {
             this.state = State.CLOSED;
-            this.streams.forEach((k, v) -> v.close());
+            this.streams.forEach((k, v) -> v.terminate());
             this.streams.clear();
             super.close();
             this.contextReuseManager.returnHttp2ConnectionContext(this);
@@ -313,6 +318,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
             goAwayFrame.setLastStreamId(highestStreamId)
                     .setErrorCode(e.getCode())
+                    .setStreamId(0)
                     .write(outputBuffer);
             sendOutput(outputBuffer);
 
@@ -397,42 +403,43 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             // (that is, HEADERS, PUSH_PROMISE, and CONTINUATION), a SETTINGS frame, and any frame
             // with a stream identifier of 0.
             if (length > serverSettings.getMaxFrameSize()) {
-                final FrameType type = FrameType.valueOf(inputBuffer.peekByte(3));
+                // NOTE: It is up to the implementation to decide whether to throw a connection error
+                // or a stream error in this case. For now we throw a connection error.
                 final int streamId = inputBuffer.peek31BitInteger(5);
-                if (type == FrameType.HEADERS || type == FrameType.PUSH_PROMISE ||
-                        type == FrameType.CONTINUATION || type == FrameType.SETTINGS || streamId == 0) {
-                    throw new Http2Exception(Http2ErrorCode.CONNECT_ERROR, streamId);
-                }
+                throw new Http2Exception(Http2ErrorCode.FRAME_SIZE_ERROR, streamId);
             }
 
             // Make sure we have enough data to handle the entire frame.
             if (inputBuffer.available(Frame.FRAME_HEADER_SIZE + length)) {
                 final var type = FrameType.valueOf(inputBuffer.peekByte(3));
-                System.out.println("HANDLING " + type);
-                switch (type) {
-                    // SPEC: 6.1 DATA
-                    case DATA -> handleData();
-                    // SPEC: 6.2 HEADERS
-                    case HEADERS -> handleHeaders();
-                    // SPEC: 6.3 PRIORITY
-                    case PRIORITY -> handlePriority();
-                    // SPEC: 6.4 RST_STREAM
-                    case RST_STREAM -> handleRstStream();
-                    // SPEC: 6.5 SETTINGS
-                    case SETTINGS -> handleSettings();
-                    // SPEC: 6.6 PUSH_PROMISE
-                    case PUSH_PROMISE -> handlePushPromise();
-                    // SPEC: 6.7 PING
-                    case PING -> handlePing();
-                    // SPEC: 6.8 GO_AWAY
-                    case GO_AWAY -> handleGoAway();
-                    // SPEC: 6.9 WINDOW_UPDATE
-                    case WINDOW_UPDATE -> handleWindowUpdate();
-                    // SPEC: 6.10 CONTINUATION
-                    case CONTINUATION -> handleContinuationFrame();
-                    // SPEC: 4.1 Frame Format
-                    // Implementations MUST ignore and discard frames of unknown types.
-                    default -> skipUnknownFrame();
+                if (type == null) {
+                    skipUnknownFrame();
+                } else {
+                    switch (type) {
+                        // SPEC: 6.1 DATA
+                        case DATA -> handleData();
+                        // SPEC: 6.2 HEADERS
+                        case HEADERS -> handleHeaders();
+                        // SPEC: 6.3 PRIORITY
+                        case PRIORITY -> handlePriority();
+                        // SPEC: 6.4 RST_STREAM
+                        case RST_STREAM -> handleRstStream();
+                        // SPEC: 6.5 SETTINGS
+                        case SETTINGS -> handleSettings();
+                        // SPEC: 6.6 PUSH_PROMISE
+                        case PUSH_PROMISE -> handlePushPromise();
+                        // SPEC: 6.7 PING
+                        case PING -> handlePing();
+                        // SPEC: 6.8 GO_AWAY
+                        case GO_AWAY -> handleGoAway();
+                        // SPEC: 6.9 WINDOW_UPDATE
+                        case WINDOW_UPDATE -> handleWindowUpdate();
+                        // SPEC: 6.10 CONTINUATION
+                        case CONTINUATION -> handleContinuationFrame();
+                        // SPEC: 4.1 Frame Format
+                        // Implementations MUST ignore and discard frames of unknown types.
+                        default -> skipUnknownFrame();
+                    }
                 }
 
                 // We successfully handled the frame. There may be more data to process,
@@ -513,17 +520,16 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // or the stream has not yet been opened.
         final var stream = streams.get(streamId);
         if (stream == null) {
-            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
-
+            if (streamId <= highestStreamId) {
+                throw new Http2Exception(Http2ErrorCode.STREAM_CLOSED, streamId);
+            } else {
+                throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+            }
         }
 
         // Delegate to the stream to handle the data frame. If the stream throws an Http2Exception,
         // then terminate the stream (not the connection).
-        try {
-            stream.handleDataFrame(dataFrame);
-        } catch (Http2Exception e) {
-            onStreamException(e);
-        }
+        stream.handleDataFrame(dataFrame);
     }
 
     /**
@@ -545,20 +551,6 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         //       the highest value it can be is 2^31, which is fine. Any streams created after this won't
         //       have a higher value available, so they will necessarily have to close things down and start
         //       a new connection, or send us a bogus stream ID we will close on (down below).
-
-        // SPEC: 5.1.1 Stream Identifiers
-        // Streams initiated by a client MUST use odd-numbered stream identifiers...
-        // The identifier of a newly established stream MUST be numerically greater than all streams that the
-        // initiating endpoint has opened or reserved. This governs streams that are opened using a HEADERS frame and
-        // streams that are reserved using PUSH_PROMISE. An endpoint that receives an unexpected stream identifier MUST
-        // respond with a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
-        if (streamId <= highestStreamId) {
-            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
-        }
-
-        // This should absolutely not be possible because the stream ID has to be strictly
-        // increasing, as covered by the above code
-        assert !streams.containsKey(streamId);
 
         // SPEC 6.8 GOAWAY
         // After sending a GOAWAY frame, the sender can discard frames for streams initiated by the receiver with
@@ -582,39 +574,53 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             }
         }
 
-        // SPEC: 5.1.2 Stream Concurrency
-        // Endpoints MUST NOT exceed the limit set by their peer. An endpoint that receives a HEADERS frame that causes
-        // its advertised concurrent stream limit to be exceeded MUST treat this as a stream error (Section 5.4.2) of
-        // type PROTOCOL_ERROR or REFUSED_STREAM. The choice of error code determines whether the endpoint wishes to
-        // enable automatic retry (see Section 8.7 for details).
-        if (streams.size() > serverSettings.getMaxConcurrentStreams()) {
-            // TODO Do I need to process the header data to keep my compression states in sync?? Almost certainly
-            throw new Http2Exception(Http2ErrorCode.REFUSED_STREAM, streamId);
-        }
+        var stream = streams.get(streamId);
+        if (stream == null) {
+            // SPEC: 5.1.1 Stream Identifiers
+            // Streams initiated by a client MUST use odd-numbered stream identifiers...
+            // The identifier of a newly established stream MUST be numerically greater than all streams that the
+            // initiating endpoint has opened or reserved. This governs streams that are opened using a HEADERS frame and
+            // streams that are reserved using PUSH_PROMISE. An endpoint that receives an unexpected stream identifier MUST
+            // respond with a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+            if (streamId <= highestStreamId) {
+                // TODO Conflicting info. 5.1.1 says PROTOCOL_ERROR, spec test says STREAM_CLOSED
+                throw new Http2Exception(Http2ErrorCode.STREAM_CLOSED, streamId);
+            }
 
-        // OK, so we have a new stream. That's great! Let's create a new Http2RequestContext to
-        // handle it. When it is closed, we need to remove it from the map.
-        final var stream = contextReuseManager.checkoutHttp2RequestContext();
-        stream.init(this, streamId);
-        highestStreamId = streamId;
+            // This should absolutely not be possible because the stream ID has to be strictly
+            // increasing, as covered by the above code
+            assert !streams.containsKey(streamId);
 
-        // Put it in the map
-        streams.put(streamId, stream);
+            // SPEC: 5.1.2 Stream Concurrency
+            // Endpoints MUST NOT exceed the limit set by their peer. An endpoint that receives a HEADERS frame that causes
+            // its advertised concurrent stream limit to be exceeded MUST treat this as a stream error (Section 5.4.2) of
+            // type PROTOCOL_ERROR or REFUSED_STREAM. The choice of error code determines whether the endpoint wishes to
+            // enable automatic retry (see Section 8.7 for details).
+            if (streams.size() >= serverSettings.getMaxConcurrentStreams()) {
+                // TODO Do I need to process the header data to keep my compression states in sync?? Almost certainly
+                throw new Http2Exception(Http2ErrorCode.REFUSED_STREAM, streamId);
+            }
 
-        // SPEC: 6.2
-        // A HEADERS frame without the END_HEADERS flag set MUST be followed by a CONTINUATION frame for the same
-        // stream. A receiver MUST treat the receipt of any other type of frame or a frame on a different stream as
-        // a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
-        if (!headersFrame.isEndHeaders()) {
-            this.state = State.CONTINUATION;
+            // OK, so we have a new stream. That's great! Let's create a new Http2RequestContext to
+            // handle it. When it is closed, we need to remove it from the map.
+            stream = contextReuseManager.checkoutHttp2RequestContext();
+            stream.init(this, streamId, clientSettings);
+            highestStreamId = streamId;
+
+            // Put it in the map
+            streams.put(streamId, stream);
+
+            // SPEC: 6.2
+            // A HEADERS frame without the END_HEADERS flag set MUST be followed by a CONTINUATION frame for the same
+            // stream. A receiver MUST treat the receipt of any other type of frame or a frame on a different stream as
+            // a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+            if (!headersFrame.isEndHeaders()) {
+                this.state = State.CONTINUATION;
+            }
         }
 
         // Delegate to the stream to handle the header frame.
-        try {
-            stream.handleHeadersFrame(headersFrame);
-        } catch (Http2Exception e) {
-            onStreamException(e);
-        }
+        stream.handleHeadersFrame(headersFrame);
     }
 
     /**
@@ -652,11 +658,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         }
 
         // Delegate to the stream to handle the frame
-        try {
-            stream.handlePriorityFrame(priorityFrame);
-        } catch (Http2Exception e) {
-            onStreamException(e);
-        }
+        stream.handlePriorityFrame(priorityFrame);
     }
 
     /**
@@ -682,11 +684,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         }
 
         // Delegate to the stream to handle
-        try {
-            stream.handleRstStreamFrame(rstStreamFrame);
-        } catch (Http2Exception exception) {
-            onStreamException(exception);
-        }
+        stream.handleRstStreamFrame(rstStreamFrame);
     }
 
     /**
@@ -707,20 +705,34 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             // This means that we don't need to allow the full range of values, and in fact if we did, we could
             // be open to a DOS where the client asks for a really, really, big size. So we will cap the maximum
             // header table size.
-            final var effectiveHeaderTableSize = Math.min(clientSettings.getHeaderTableSize(), maxHeaderTableSize);
+            final var effectiveHeaderTableSize = Math.min(settingsFrame.getHeaderTableSize(), maxHeaderTableSize);
 
             // If the settings have changed, then recreate the codec
-            if (formerMaxHeaderListSize != clientSettings.getMaxHeaderListSize() ||
+            if (formerMaxHeaderListSize != settingsFrame.getMaxHeaderListSize() ||
                     formerHeaderTableSize != effectiveHeaderTableSize) {
                 recreateCodec();
             }
+
+            // Update the flow control credits for the connection
+            flowControlLock.lock();
+            try {
+                final var diff = settingsFrame.getInitialWindowSize() - clientSettings.getInitialWindowSize();
+                clientFlowControlCredits.addAndGet((int) diff);
+                final var itr = streams.values().iterator();
+                while (itr.hasNext()) {
+                    final var stream = itr.next();
+                    stream.updateFlowControlCredits(diff);
+                }
+            } finally {
+                flowControlLock.unlock();
+            }
+
+            settingsFrame.mergeInto(clientSettings);
 
             // Write the ACK frame to the client
             final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
             settingsFrame.writeAck(outputBuffer);
             sendOutput(outputBuffer);
-        } else {
-            settingsFrame.mergeInto(clientSettings);
         }
     }
 
@@ -773,11 +785,40 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // Once the GOAWAY is sent, the sender will ignore frames sent on streams initiated by the receiver if the
         // stream has an identifier higher than the included last stream identifier
 
-        // TODO If we ignore these frames, then it is possible that when we're trying to flush
-        //      buffers to the client we are unable to send everything. So I think we should
-        //      continue to process these.
-        windowUpdateFrame.parse2(inputBuffer);
-        clientFlowControlCredits += windowUpdateFrame.getWindowSizeIncrement();
+        flowControlLock.lock();
+        try {
+            // TODO ALL WRONG
+            windowUpdateFrame.parse2(inputBuffer);
+            if (windowUpdateFrame.getStreamId() == 0) {
+                // SPEC 6.9.1
+                // A sender MUST NOT allow a flow-control window to exceed 231-1 octets. If a sender receives a WINDOW_UPDATE
+                // that causes a flow-control window to exceed this maximum, it MUST terminate either the stream or the
+                // connection, as appropriate. For streams, the sender sends a RST_STREAM with an error code of
+                // FLOW_CONTROL_ERROR; for the connection, a GOAWAY frame with an error code of FLOW_CONTROL_ERROR is sent.
+                final var wouldOverflow = (long) clientFlowControlCredits.get() + windowUpdateFrame.getWindowSizeIncrement() >= (1L << 31);
+                if (wouldOverflow) {
+                    throw new Http2Exception(Http2ErrorCode.FLOW_CONTROL_ERROR, 0);
+                }
+
+                clientFlowControlCredits.addAndGet(windowUpdateFrame.getWindowSizeIncrement());
+            } else {
+                // It is an error to receive an RST_STREAM frame for a stream that is already closed,
+                // or hasn't been opened.
+                final var streamId = checkStreamIsOdd(windowUpdateFrame.getStreamId());
+                final var stream = streams.get(streamId);
+                if (stream == null) {
+                    throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+                }
+
+                stream.handleWindowUpdateFrame(windowUpdateFrame);
+            }
+
+            // TODO If we ignore these frames, then it is possible that when we're trying to flush
+            //      buffers to the client we are unable to send everything. So I think we should
+            //      continue to process these.
+        } finally {
+            flowControlLock.unlock();
+        }
     }
 
     /**
@@ -820,17 +861,16 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // or the stream has not yet been opened.
         final var stream = streams.get(streamId);
         if (stream == null) {
-            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
-
+            if (streamId <= highestStreamId) {
+                throw new Http2Exception(Http2ErrorCode.STREAM_CLOSED, streamId);
+            } else {
+                throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+            }
         }
 
         // Delegate to the stream to handle the continuation frame. If the stream throws an Http2Exception,
         // then terminate the stream (not the connection).
-        try {
-            stream.handleContinuationFrame(continuationFrame);
-        } catch (Http2Exception e) {
-            onStreamException(e);
-        }
+        stream.handleContinuationFrame(continuationFrame);
     }
 
     /**
@@ -860,35 +900,6 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         return streamId;
     }
 
-    /**
-     * Handler for stream exceptions.
-     *
-     * @param exception The exception to handle.
-     */
-    private void onStreamException(Http2Exception exception) {
-        if (++penaltyCount > patienceThreshold) {
-            // We've lost patience. Shut it down.
-            throw new BadClientException();
-        }
-
-        // SPEC: 5.4.2 Stream Error Handling
-        // An endpoint that detects a stream error sends a RST_STREAM frame (Section 6.4) that contains the stream
-        // identifier of the stream where the error occurred. The RST_STREAM frame includes an error code that
-        // indicates the type of error.
-        final var streamId = exception.getStreamId();
-        final OutputBuffer outputBuffer = contextReuseManager.checkoutOutputBuffer();
-        rstStreamFrame.setStreamId(streamId)
-                .setErrorCode(exception.getCode())
-                .write(outputBuffer);
-        sendOutput(outputBuffer);
-
-        // Shut down the stream
-        final var stream = streams.get(streamId);
-        if (stream != null) {
-            stream.close();
-        }
-    }
-
     // =================================================================================================================
     // Http2Connection Methods
 
@@ -896,7 +907,21 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      * {@inheritDoc}
      */
     @Override
-    public void close(int streamId) {
+    public void onClose(int streamId) {
+//        streams.remove(streamId);
+    }
+
+    @Override
+    public void onBadClient(int streamId) {
+        if (++penaltyCount > patienceThreshold) {
+            // We've lost patience. Shut it down.
+            // TODO Don't throw an exception, actually terminate things
+            throw new BadClientException();
+        }
+    }
+
+    @Override
+    public void onTerminate(int streamId) {
         // This method may be called from any thread, which is why "streams" is a concurrent collection.
         streams.remove(streamId);
     }
@@ -912,6 +937,16 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
     @Override
     public Http2HeaderCodec getHeaderCodec() {
         return codec;
+    }
+
+    @Override
+    public ReentrantLock getFlowControlLock() {
+        return flowControlLock;
+    }
+
+    @Override
+    public AtomicInteger getFlowControlCredits() {
+        return clientFlowControlCredits;
     }
 
     /**

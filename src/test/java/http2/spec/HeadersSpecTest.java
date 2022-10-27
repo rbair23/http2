@@ -11,7 +11,7 @@ public class HeadersSpecTest extends SpecTest {
     @BeforeEach
     void setUp() throws IOException {
         super.setUp();
-        client.initializeConnection();
+//        client.initializeConnection();
     }
 
     // TODO Devise tests that end all kinds of good headers, and bad ones.

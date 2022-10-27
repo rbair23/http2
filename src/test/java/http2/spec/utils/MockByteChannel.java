@@ -1,4 +1,4 @@
-package http2.spec;
+package http2.spec.utils;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -17,7 +17,7 @@ public class MockByteChannel implements ByteChannel {
     /**
      * Initializes a new instance of this class.
      */
-    protected MockByteChannel() {
+    public MockByteChannel() {
 
     }
 
@@ -32,8 +32,13 @@ public class MockByteChannel implements ByteChannel {
         }
 
         dataReceived.flip();
+        int pos = dataReceived.position();
+        int lim = dataReceived.limit();
+        int bytesToSend = lim - pos;
         int length = copyFromBuffers(dataReceived, dst);
+        int bytesNotSent = bytesToSend - length;
         dataReceived.clear();
+        dataReceived.position(bytesNotSent);
         return length;
     }
 

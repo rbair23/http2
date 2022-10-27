@@ -1,9 +1,6 @@
 package com.hedera.hashgraph.web.impl.http;
 
-import com.hedera.hashgraph.web.HttpVersion;
-import com.hedera.hashgraph.web.StatusCode;
-import com.hedera.hashgraph.web.WebHeaders;
-import com.hedera.hashgraph.web.WebResponse;
+import com.hedera.hashgraph.web.*;
 import com.hedera.hashgraph.web.impl.Dispatcher;
 import com.hedera.hashgraph.web.impl.WebHeadersImpl;
 import com.hedera.hashgraph.web.impl.session.RequestContext;
@@ -24,11 +21,24 @@ import static com.hedera.hashgraph.web.impl.http.Http1Constants.*;
 /**
  * Handles collecting all data for a request and response along with sending the response.
  */
-class Http1RequestResponseContext extends RequestContext implements WebResponse {
+class Http1RequestResponseContext extends RequestContext implements WebRequest, WebResponse {
     private final Consumer<OutputBuffer> sendResponse;
     private final Runnable sendingComplete;
     private final Supplier<OutputBuffer> checkoutOutputBuffer;
     private BodyInputStream requestBody;
+
+    // =================================================================================================================
+    // Request Data
+
+    /**
+     * This field is set while parsing the HTTP request, and before the request is sent to a handler.
+     */
+    private String method;
+
+    /**
+     * This field is set while parsing the HTTP request, and before the request is sent to a handler.
+     */
+    private String path;
 
     /**
      * The request headers. This instance is reused between requests. After we read all the header data,
@@ -121,10 +131,27 @@ class Http1RequestResponseContext extends RequestContext implements WebResponse 
     @Override
     protected void reset() {
         super.reset();
+        method = null;
+        path = null;
         this.requestHeaders.clear();
         this.responseHeaders.clear();
         this.responseStatusCode = null;
         this.respondHasBeenCalled = false;
+    }
+
+    @Override
+    public String getMethod() {
+        return method;
+    }
+
+    @Override
+    public String getPath() {
+        return path;
+    }
+
+    @Override
+    public HttpVersion getVersion() {
+        return version;
     }
 
     /**

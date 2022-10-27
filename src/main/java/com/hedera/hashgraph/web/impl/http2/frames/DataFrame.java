@@ -168,6 +168,9 @@ public final class DataFrame extends Frame {
 
         // Get the padLength, if present.
         final var padLength = paddedFlag ? in.readByte() : 0;
+        if (padLength >= getPayloadLength()) {
+            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+        }
 
         // Compute the number of bytes that are part of the payload that are part of the block length,
         // and then read the block of fragment data.

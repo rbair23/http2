@@ -29,32 +29,36 @@ public final class Http2Headers extends WebHeadersImpl {
         return pseudoHeaders.get(":method");
     }
 
-    public void putMethod(String method) {
+    public Http2Headers putMethod(String method) {
         pseudoHeaders.put(":method", method);
+        return this;
     }
 
     public String getScheme() {
         return pseudoHeaders.get(":scheme");
     }
 
-    public void putScheme(String scheme) {
+    public Http2Headers putScheme(String scheme) {
         pseudoHeaders.put(":scheme", scheme);
+        return this;
     }
 
     public String getAuthority() {
         return pseudoHeaders.get(":authority");
     }
 
-    public void putAuthority(String authority) {
+    public Http2Headers putAuthority(String authority) {
         pseudoHeaders.put(":authority", authority);
+        return this;
     }
 
     public String getPath() {
         return pseudoHeaders.get(":path");
     }
 
-    public void putPath(String path) {
+    public Http2Headers putPath(String path) {
         pseudoHeaders.put(":path", path);
+        return this;
     }
 
     public StatusCode getStatus() {
@@ -71,8 +75,9 @@ public final class Http2Headers extends WebHeadersImpl {
         }
     }
 
-    public void putStatus(StatusCode status) {
+    public Http2Headers putStatus(StatusCode status) {
         pseudoHeaders.put(":status", "" + status.code());
+        return this;
     }
 
     @Override

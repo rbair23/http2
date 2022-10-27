@@ -47,9 +47,6 @@ public class Http2HeaderCodec {
                 // sensitive is a boolean
                 final var headerName = new String(name);
                 final var headerValue = new String(value);
-
-                System.out.println("Decoded: " + headerName + " = " + headerValue);
-
                 if (headerName.charAt(0) == ':') {
                     headers.putPseudoHeader(headerName, headerValue);
                 } else {
@@ -68,6 +65,8 @@ public class Http2HeaderCodec {
                 }
             }
         });
+
+        decoder.endHeaderBlock();
     }
 
     private static final class MeteredOutputStream extends OutputStream {

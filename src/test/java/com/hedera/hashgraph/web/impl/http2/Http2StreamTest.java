@@ -19,6 +19,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -47,13 +49,13 @@ class Http2StreamTest {
     @Test
     void init_connectionCannotBeNull() {
         final var ctx = ctxManager.checkoutHttp2RequestContext();
-        assertThrows(NullPointerException.class, () -> ctx.init(null, 1));
+        assertThrows(NullPointerException.class, () -> ctx.init(null, 1, null));
     }
 
     @Test
     void handleHeaders_headerFrameCannotBeNull() {
         final var ctx = ctxManager.checkoutHttp2RequestContext();
-        ctx.init(new StubConnection(), 1);
+        ctx.init(new StubConnection(), 1, null);
         assertThrows(NullPointerException.class, () -> ctx.handleHeadersFrame(null));
     }
 
@@ -90,7 +92,7 @@ class Http2StreamTest {
         });
 
         final var ctx = ctxManager.checkoutHttp2RequestContext();
-        ctx.init(connection, 1);
+        ctx.init(connection, 1, null);
 
         final var requestHeaders = new Http2Headers();
         requestHeaders.put("a", "alpha");
@@ -146,7 +148,27 @@ class Http2StreamTest {
         }
 
         @Override
-        public void close(int streamId) {
+        public ReentrantLock getFlowControlLock() {
+            return null;
+        }
+
+        @Override
+        public AtomicInteger getFlowControlCredits() {
+            return null;
+        }
+
+        @Override
+        public void onBadClient(int streamId) {
+
+        }
+
+        @Override
+        public void onTerminate(int streamId) {
+
+        }
+
+        @Override
+        public void onClose(int streamId) {
             // no-op
         }
 

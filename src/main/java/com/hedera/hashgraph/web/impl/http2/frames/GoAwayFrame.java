@@ -106,6 +106,15 @@ public final class GoAwayFrame extends Frame {
     }
 
     @Override
+    public GoAwayFrame setStreamId(int streamId) {
+        if (streamId != 0) {
+            throw new IllegalArgumentException("StreamID must be 0");
+        }
+        super.setStreamId(streamId);
+        return this;
+    }
+
+    @Override
     public void parse2(final InputBuffer in) {
         // Parse the headers
         super.parse2(in);

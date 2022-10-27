@@ -32,7 +32,7 @@ class PingFrameTest extends FrameTestBase {
 
     @Test
     void twoArgPingFrameConstructor() {
-        final var data = randomLong();
+        final var data = randomBytes(8);
         final var frame = new PingFrame(true, data);
         assertEquals(PAYLOAD_LENGTH, frame.getPayloadLength());
         assertEquals(0, frame.getStreamId());
@@ -124,7 +124,7 @@ class PingFrameTest extends FrameTestBase {
 
     @Test
     void writeAck() {
-        final var data = randomLong();
+        final var data = randomBytes(8);
         final var ping = new PingFrame(false, data);
         ping.writeAck(outputBuffer);
         fillInputBuffer();
@@ -140,7 +140,7 @@ class PingFrameTest extends FrameTestBase {
 
     @Test
     void write() {
-        final var data = randomLong();
+        final var data = randomBytes(8);
         final var ping = new PingFrame(false, data);
         ping.write(outputBuffer);
         fillInputBuffer();
@@ -173,7 +173,7 @@ class PingFrameTest extends FrameTestBase {
      */
     private static Stream<Arguments> provideFuzzInputs() {
         final var out = new OutputBuffer(FRAME_HEADER_SIZE + PAYLOAD_LENGTH);
-        final var ping = new PingFrame(false, 0b0010_0101_0011_1100_1010_1011_1101_1111L);
+        final var ping = new PingFrame(false, randomBytes(8));
         ping.write(out);
         final var goodBytes = out.getBuffer().array();
         final var rand = new Random(10293848673L);

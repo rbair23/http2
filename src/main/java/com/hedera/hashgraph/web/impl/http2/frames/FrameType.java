@@ -20,8 +20,7 @@ public enum FrameType {
      * A convenience function for getting the enum value based on the ordinal.
      *
      * @param ordinal The ordinal value.
-     * @return The enum value with the matching ordinal
-     * @throws IllegalArgumentException if the ordinal is not a valid value
+     * @return The enum value with the matching ordinal, or null if one cannot be found.
      */
     public static FrameType valueOf(int ordinal) {
         return switch (ordinal) {
@@ -35,7 +34,7 @@ public enum FrameType {
             case 7 -> GO_AWAY;
             case 8 -> WINDOW_UPDATE;
             case 9 -> CONTINUATION;
-            default -> throw new IllegalArgumentException("Unknown type " + ordinal);
+            default -> null;
         };
     }
 }

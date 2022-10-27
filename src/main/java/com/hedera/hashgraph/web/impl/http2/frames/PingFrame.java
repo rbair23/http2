@@ -22,7 +22,7 @@ public final class PingFrame extends Frame {
     /**
      * 8 bytes of random data, but we just interpret that as a number because it is more efficient
      */
-    private long data;
+    private byte[] data = new byte[8];
 
     /**
      * Create a new PingFrame
@@ -38,7 +38,7 @@ public final class PingFrame extends Frame {
      * @param ack The value to set for the "ack" flag
      * @param data The value to use for the data
      */
-    public PingFrame(boolean ack, long data) {
+    public PingFrame(boolean ack, byte[] data) {
         super(FrameType.PING);
         setPayloadLength(PAYLOAD_LENGTH);
         setAck(ack);
@@ -76,7 +76,7 @@ public final class PingFrame extends Frame {
      *
      * @return the 8 bytes of data
      */
-    public long getData() {
+    public byte[] getData() {
         return data;
     }
 
@@ -85,7 +85,7 @@ public final class PingFrame extends Frame {
      *
      * @param data The data.
      */
-    private void setData(long data) {
+    private void setData(byte[] data) {
         this.data = data;
     }
 
@@ -118,7 +118,7 @@ public final class PingFrame extends Frame {
         // SPEC: 6.7
         // In addition to the frame header, PING frames MUST contain 8 octets of opaque data in the frame payload. A
         // sender can include any value it chooses and use those octets in any fashion.
-        setData(in.read64BitLong());
+        in.readBytes(data, 0, 8);
     }
 
     /**
@@ -127,7 +127,7 @@ public final class PingFrame extends Frame {
     @Override
     public void write(final OutputBuffer out) {
         super.write(out);
-        out.write64BitLong(data);
+        out.write(data);
     }
 
     /**
@@ -137,6 +137,6 @@ public final class PingFrame extends Frame {
      */
     public void writeAck(final OutputBuffer outputBuffer) {
         Frame.writeHeader(outputBuffer, PAYLOAD_LENGTH, FrameType.PING, (byte) 0x1, 0);
-        outputBuffer.write64BitLong(getData());
+        outputBuffer.write(data);
     }
 }

@@ -93,7 +93,7 @@ public final class RstStreamFrame extends Frame {
         // SPEC:
         // A RST_STREAM frame with a length other than 4 octets MUST be treated as a connection error (Section 5.4.1)
         // of type FRAME_SIZE_ERROR.
-        if (getFrameLength() != 4) {
+        if (getPayloadLength() != 4) {
             throw new Http2Exception(Http2ErrorCode.FRAME_SIZE_ERROR, streamId);
         }
 
@@ -113,5 +113,9 @@ public final class RstStreamFrame extends Frame {
         // Write out the header.
         super.write(out);
         out.write32BitUnsignedInteger(errorCode.ordinal());
+    }
+
+    public RstStreamFrame reset() {
+        return setErrorCode(Http2ErrorCode.NO_ERROR);
     }
 }

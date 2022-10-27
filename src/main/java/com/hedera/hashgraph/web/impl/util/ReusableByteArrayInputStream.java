@@ -12,4 +12,8 @@ public final class ReusableByteArrayInputStream extends ByteArrayInputStream {
         mark = 0;
         pos = 0;
     }
+
+    public void length(int length) {
+        count = length;
+    }
 }

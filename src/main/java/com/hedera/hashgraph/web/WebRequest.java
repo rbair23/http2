@@ -7,7 +7,7 @@ import java.io.InputStream;
  * Contains all data related to the web request, and provides the means to create a
  * response to send data back to the client.
  */
-public interface WebRequest extends AutoCloseable {
+public interface WebRequest {
     /**
      * Returns an immutable {@link WebHeaders} containing the HTTP headers that were
      * included with this request. The keys in this object will be the header
