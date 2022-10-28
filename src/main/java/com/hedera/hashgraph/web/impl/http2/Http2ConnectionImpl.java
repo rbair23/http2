@@ -559,7 +559,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             // I have to process this frame's data to keep my compression state in sync. But otherwise I can
             // refuse the connection.
             try {
-                codec.decode(null, new ByteArrayInputStream(headersFrame.getFieldBlockFragment()));
+                codec.decode(null, new ByteArrayInputStream(headersFrame.getFieldBlockFragment()), streamId);
                 // TODO Not sure if REFUSED_STREAM is right here...
                 throw new Http2Exception(Http2ErrorCode.REFUSED_STREAM, streamId);
             } catch (IOException exception) {
@@ -830,7 +830,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             // I have to process this frame's data to keep my compression state in sync. But otherwise I can
             // refuse the connection.
             try {
-                codec.decode(null, new ByteArrayInputStream(continuationFrame.getFieldBlockFragment()));
+                codec.decode(null, new ByteArrayInputStream(continuationFrame.getFieldBlockFragment()), streamId);
                 return;
             } catch (IOException exception) {
                 // This shouldn't be possible. If it happens, terminate things.

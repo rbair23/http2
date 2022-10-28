@@ -1,19 +1,10 @@
 package http2.spec;
 
-import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
-import com.hedera.hashgraph.web.impl.http2.Http2Headers;
-import com.hedera.hashgraph.web.impl.http2.frames.DataFrame;
-import com.hedera.hashgraph.web.impl.http2.frames.GoAwayFrame;
-import com.hedera.hashgraph.web.impl.http2.frames.RstStreamFrame;
-import com.hedera.hashgraph.web.impl.http2.frames.Settings;
-import org.junit.jupiter.api.*;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @DisplayName("Section 7 :: Error Codes")
 @Tag("7")

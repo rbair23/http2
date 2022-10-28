@@ -1,7 +1,6 @@
 package http2.spec.utils;
 
 import com.hedera.hashgraph.web.StatusCode;
-import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.WebRoutes;
 import com.hedera.hashgraph.web.WebServerConfig;
 import com.hedera.hashgraph.web.impl.Dispatcher;
@@ -19,12 +18,12 @@ import com.twitter.hpack.Encoder;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedList;
-import java.util.NoSuchElementException;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 public class DirectClientConnection implements ClientConnection {
     private MockByteChannel clientChannel;
@@ -33,7 +32,9 @@ public class DirectClientConnection implements ClientConnection {
     private Server server;
     private Settings serverSettings;
     private LinkedList<Frame> receivedFrames = new LinkedList<>();
-    private Http2HeaderCodec codec = new Http2HeaderCodec(new Encoder(4096), new Decoder(4096, 4096));
+    private Encoder encoder = new Encoder(4096);
+    private Decoder decoder = new Decoder(4096, 4096);
+    private Http2HeaderCodec codec = new Http2HeaderCodec(encoder, decoder);
 
     private long timeout;
     private TimeUnit timeoutUnit;
@@ -115,6 +116,19 @@ public class DirectClientConnection implements ClientConnection {
         final var out = new ByteArrayOutputStream();
         int length = codec.encode(headers, out);
         return send(new HeadersFrame(endHeaders, endStream, streamId, out.toByteArray(), length));
+    }
+
+    @Override
+    public ClientConnection sendHeaders(boolean endHeaders, boolean endStream, int streamId, List<String> headers) throws IOException {
+        assert headers.size() % 2 == 0;
+        final var out = new ByteArrayOutputStream();
+        for (int i = 0; i < headers.size(); i += 2) {
+            final var key = headers.get(i).getBytes(StandardCharsets.UTF_8);
+            final var value = headers.get(i + 1).getBytes(StandardCharsets.UTF_8);
+            encoder.encodeHeader(out, key, value, false);
+        }
+
+        return send(new HeadersFrame(endHeaders, endStream, streamId, out.toByteArray(), out.size()));
     }
 
     @Override

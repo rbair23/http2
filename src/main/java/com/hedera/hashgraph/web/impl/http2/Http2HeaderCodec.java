@@ -7,9 +7,26 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Http2HeaderCodec {
+    private static final Set<String> VALID_REQUEST_PSEUDO_HEADERS = new HashSet<>(Arrays.asList(
+            ":method",
+            ":scheme",
+            ":authority",
+            ":path"));
+
+    private static final Set<String> FORBIDDEN_REQUEST_HEADERS = new HashSet<>(Arrays.asList(
+            "connection",
+            "proxy-connection",
+            "keep-alive",
+            "transfer-encoding",
+            "upgrade"));
+
     private final Encoder encoder;
     private final Decoder decoder;
     private final MeteredOutputStream metered = new MeteredOutputStream();
@@ -37,19 +54,49 @@ public class Http2HeaderCodec {
         return length;
     }
 
-    public void decode(Http2Headers headers, InputStream headerData) throws IOException {
+    public void decode(Http2Headers headers, InputStream headerData, final int streamId) throws IOException {
         if (headers != null) {
             headers.clear();
-        }
+            final var pseudoHeadersDecoded = new AtomicBoolean(false);
+            decoder.decode(headerData, (name, value, sensitive) -> {
+                // Check for any headers that contained an uppercase character. If they do, then we have to throw.
+                for (byte b : name) {
+                    if (Character.isUpperCase(b)) {
+                        throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+                    }
+                }
 
-        decoder.decode(headerData, (name, value, sensitive) -> {
-            if (headers != null) {
                 // sensitive is a boolean
                 final var headerName = new String(name);
                 final var headerValue = new String(value);
+
                 if (headerName.charAt(0) == ':') {
-                    headers.putPseudoHeader(headerName, headerValue);
+                    if (!VALID_REQUEST_PSEUDO_HEADERS.contains(headerName)) {
+                        throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+                    }
+
+                    if (pseudoHeadersDecoded.get()) {
+                        // Oof, we're getting pseudo-headers AFTER regular headers. No good.
+                        throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+                    }
+
+                    // If the header has already been specified, it is an error
+                    if (headers.putPseudoHeader(headerName, headerValue)) {
+                        throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+                    }
                 } else {
+                    pseudoHeadersDecoded.set(true);
+
+                    if (FORBIDDEN_REQUEST_HEADERS.contains(headerName)) {
+                        throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+                    }
+
+                    if ("te".equals(headerName)) {
+                        if (!"trailers".equals(headerValue)) {
+                            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+                        }
+                    }
+
                     // TODO:
                         /*
                             Clients MUST NOT generate a request with a Host header field that differs from the ":authority"
@@ -63,11 +110,10 @@ public class Http2HeaderCodec {
                          */
                     headers.put(headerName, headerValue);
                 }
-            }
         });
-
         decoder.endHeaderBlock();
     }
+}
 
     private static final class MeteredOutputStream extends OutputStream {
         private int bytesWritten = 0;

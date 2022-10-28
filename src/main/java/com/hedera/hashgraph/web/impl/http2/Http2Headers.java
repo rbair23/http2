@@ -13,8 +13,10 @@ public final class Http2Headers extends WebHeadersImpl {
     public Http2Headers() {
     }
 
-    public void putPseudoHeader(String key, String value) {
+    public boolean putPseudoHeader(String key, String value) {
+        final var replaced = this.pseudoHeaders.containsKey(key);
         this.pseudoHeaders.put(key, value);
+        return replaced;
     }
 
     public String getPseudoHeader(String key) {

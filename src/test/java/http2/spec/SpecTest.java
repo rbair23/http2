@@ -73,6 +73,19 @@ abstract class SpecTest {
         return h;
     }
 
+    protected List<String> createCommonHeadersList() {
+        final var h = new ArrayList<String>();
+        h.add(":method");
+        h.add("GET");
+        h.add(":scheme");
+        h.add("http"); // TODO get from config
+        h.add(":path");
+        h.add("/"); // TODO get from config
+        h.add(":authority");
+        h.add("localhost"); // TODO get from config
+        return h;
+    }
+
     protected Http2Headers createDummyHeaders(int dummyStringLength, int numDummies) {
         final var headers = createCommonHeaders();
         for (int i = 0; i < numDummies; i++) {

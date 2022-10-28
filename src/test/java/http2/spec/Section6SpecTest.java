@@ -152,7 +152,7 @@ public class Section6SpecTest {
          * The PRIORITY frame always identifies a stream. If a PRIORITY frame is received with a stream identifier
          * of 0x0, the recipient MUST respond with a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
          */
-        @ParameterizedTest
+        @ParameterizedTest(name = "With stream dependency of {0}")
         @ValueSource(ints = {0, 1})
         @DisplayName("Sends a PRIORITY frame with 0x0 stream identifier")
         void sendPriorityFrameWithStream0(int streamDep) throws IOException {
@@ -257,7 +257,7 @@ public class Section6SpecTest {
          * anything other than 0x0, the endpoint MUST respond with a connection error (Section 5.4.1) of type
          * PROTOCOL_ERROR.
          */
-        @ParameterizedTest
+        @ParameterizedTest(name = "With streamId of {0}")
         @ValueSource(ints = { 1, 3, 11 })
         @DisplayName("Sends a SETTINGS frame with a stream identifier other than 0x0")
         void sendSettingsWithNonZeroStreamId(int streamId) throws IOException {
@@ -275,7 +275,7 @@ public class Section6SpecTest {
          * <p>A SETTINGS frame with a length other than a multiple of 6 octets MUST be treated as a connection error
          * (Section 5.4.1) of type FRAME_SIZE_ERROR.
          */
-        @ParameterizedTest
+        @ParameterizedTest(name = "With frame length of {0} ")
         @ValueSource(ints = { 1, 2, 3, 4, 5, 7, 8, 9, 10 })
         @DisplayName("Sends a SETTINGS frame with a length other than a multiple of 6 octets")
         void sendSettingsWithBadLengths(int length) throws IOException {
@@ -342,7 +342,7 @@ public class Section6SpecTest {
          * Receipt of a PING frame with a length field value other than 8 MUST be treated as a connection error
          * (Section 5.4.1) of type FRAME_SIZE_ERROR.
          */
-        @ParameterizedTest
+        @ParameterizedTest(name = "With frame length of {0}")
         @ValueSource(bytes = { 0, 1, 2, 3, 4, 5, 6, 7, 9, 10 })
         @DisplayName("Sends a PING frame with a length field value other than 8")
         void sendPingWithBadLength(byte length) throws IOException {
@@ -416,7 +416,7 @@ public class Section6SpecTest {
          * A WINDOW_UPDATE frame with a length other than 4 octets MUST be treated as a connection error
          * (Section 5.4.1) of type FRAME_SIZE_ERROR.
          */
-        @ParameterizedTest
+        @ParameterizedTest(name = "With frame length of {0}")
         @ValueSource(bytes = { 1, 2, 3, 5, 6, 7, 8 })
         @DisplayName("Sends a WINDOW_UPDATE frame with a length other than 4 octets")
         void sendWindowUpdateWithWrongFrameSize(byte length) throws IOException {

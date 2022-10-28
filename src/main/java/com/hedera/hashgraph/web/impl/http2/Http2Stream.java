@@ -13,7 +13,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.Charset;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -213,6 +216,14 @@ public final class Http2Stream extends RequestContext {
         assert frame.getStreamId() == streamId :
                 "Stream ID Mismatch! Expected=" + streamId + ". Was=" + frame.getStreamId();
 
+        // SPEC: Section 8.1.2.6
+        // An endpoint that receives a HEADERS frame without the END_STREAM flag set after receiving a final
+        // (non-informational) status code MUST treat the corresponding request or response as malformed
+        // (Section 8.1.2.6).
+        if (state == State.OPEN) {
+            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+        }
+
         try {
             // TODO An endpoint receiving HEADERS, PUSH_PROMISE, or CONTINUATION frames needs to reassemble field blocks and perform
             //      decompression even if the frames are to be discarded. A receiver MUST terminate the connection with a connection
@@ -230,7 +241,6 @@ public final class Http2Stream extends RequestContext {
             // SPEC: 5.1 Stream States
             // Sending a HEADERS frame as a client, or receiving a HEADERS frame as a server, causes the stream to
             // become "open"
-            assert state != State.CLOSED : "Closed stream. StreamId=" + streamId;
             if (state == State.IDLE) {
                 state = State.OPEN;
             }
@@ -249,8 +259,7 @@ public final class Http2Stream extends RequestContext {
             // SPEC: 5.1 Stream States (idle)
             // The same HEADERS frame can also cause a stream to immediately become "half-closed".
             if (frame.isEndStream()) {
-                state = State.HALF_CLOSED;
-                submittedJob = dispatcher.dispatch(webRequest, webResponse);
+                dispatch();
             }
         } catch (Http2Exception streamException) {
             onStreamException(streamException);
@@ -342,8 +351,7 @@ public final class Http2Stream extends RequestContext {
 
             // If this is the last frame of data, then initiate the request!
             if (frame.isEndStream()) {
-                state = State.HALF_CLOSED;
-                submittedJob = dispatcher.dispatch(webRequest, webResponse);
+                dispatch();
             }
         } catch (Http2Exception streamException) {
             onStreamException(streamException);
@@ -436,6 +444,22 @@ public final class Http2Stream extends RequestContext {
     }
 
     /**
+     * Called to dispatch the web request.
+     */
+    private void dispatch() {
+        // Check for "content-length"
+        final var contentLength = webRequest.requestHeaders.getContentLength();
+        if (contentLength >= 0) {
+            if (webRequest.requestBodyLength != contentLength) {
+                throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+            }
+        }
+
+        state = State.HALF_CLOSED;
+        submittedJob = dispatcher.dispatch(webRequest, webResponse);
+    }
+
+    /**
      * Represents an HTTP/2 {@link WebRequest}. A single instance exists per {@link Http2Stream} instance,
      * and is reused.
      */
@@ -503,8 +527,21 @@ public final class Http2Stream extends RequestContext {
             try {
                 final var codec = connection.getHeaderCodec();
                 requestBodyInputStream.length(requestBodyLength);
-                codec.decode(requestHeaders, requestBodyInputStream);
+                codec.decode(requestHeaders, requestBodyInputStream, streamId);
                 requestBodyLength = 0;
+
+                if (requestHeaders.getMethod() == null) {
+                    throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+                }
+
+                if (requestHeaders.getScheme() == null) {
+                    throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+                }
+
+                final var path = requestHeaders.getPath();
+                if (path == null || path.isBlank()) {
+                    throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
+                }
             } catch (IOException ex) {
                 // SPEC: 4.3 Field Section Compression and Decompression
                 // A decoding error in a field block MUST be treated as a connection error (Section 5.4.1) of type

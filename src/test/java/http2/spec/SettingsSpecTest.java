@@ -1,17 +1,6 @@
 package http2.spec;
 
-import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
-import com.hedera.hashgraph.web.impl.http2.frames.*;
-import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
-
-import java.io.IOException;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for Section 6.5 of the spec.
