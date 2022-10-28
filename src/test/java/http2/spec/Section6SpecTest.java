@@ -9,8 +9,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @DisplayName("Section 6 :: Frame Definitions")
@@ -91,7 +90,7 @@ public class Section6SpecTest {
             client.handshake()
                     .sendHeaders(false, false, streamId, createCommonHeaders())
                     .sendPriority(streamId, 0, false, 255)
-                    .sendContinuation(true, streamId, createDummyHeaders(96, 1));
+                    .sendContinuation(true, streamId, createDummyHeaders(1));
 
             verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
         }
@@ -110,7 +109,7 @@ public class Section6SpecTest {
             client.handshake()
                     .sendHeaders(false, false, 1, createCommonHeaders())
                     .sendHeaders(true, true, 3, createCommonHeaders())
-                    .sendContinuation(true, 1, createDummyHeaders(10, 1));
+                    .sendContinuation(true, 1, createDummyHeaders(1));
 
             verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
         }
@@ -492,6 +491,193 @@ public class Section6SpecTest {
                     .sendWindowUpdate(1, 1);
             final var frame = client.awaitFrame(RstStreamFrame.class);
             assertNotNull(frame);
+        }
+    }
+
+    @Nested
+    @DisplayName("Section 6.9.2 :: Initial Flow-Control Window Size")
+    @Tags({@Tag("6"), @Tag("6.9"), @Tag("6.9.1")})
+    final class InitialFlowControlWindowTest extends SpecTest {
+        /**
+         * When the value of SETTINGS_INITIAL_WINDOW_SIZE changes, a receiver MUST adjust the size of all
+         * stream flow-control windows that it maintains by the difference between the new value and the old value.
+         */
+        @Test
+        @DisplayName("Changes SETTINGS_INITIAL_WINDOW_SIZE after sending HEADERS frame")
+        void updateAllFlowControlWindowsWhenSettingsInitialWindowSizeIsChanged() throws IOException {
+            final var len = serverDataLength();
+            assumeTrue(len > 0);
+
+            // Set the window size to 0, to prevent the server from sending any data to the client
+            final var settings = new Settings();
+            settings.setInitialWindowSize(0);
+            client.handshake().sendSettings(settings);
+            verifySettingsFrameWithAck();
+
+            // Initiate a request/response, but no DataFrame will be returned because the window size is 0
+            client.sendHeaders(true, true, 1, createCommonHeaders());
+
+            // Now update the initial window size. This will allow the server to send a data frame
+            // for stream 1
+            settings.setInitialWindowSize(1);
+            client.sendSettings(settings);
+            verifySettingsFrameWithAck();
+
+            // Verify we get the data frame with size of 1
+            final var frame = client.awaitFrame(DataFrame.class);
+            assertEquals(1, frame.getDataLength());
+        }
+
+        /**
+         * A sender MUST track the negative flow-control window and MUST NOT send new flow-controlled frames until
+         * it receives WINDOW_UPDATE frames that cause the flow-control window to become positive.
+         */
+        @Test
+        @DisplayName("Sends a SETTINGS frame for window size to be negative")
+        void causeFlowControlWindowToGoNegative() throws IOException {
+            final var len = serverDataLength();
+            assumeTrue(len > 5);
+
+            // Set the window size to 3, to prevent the server from sending all data in the response
+            final var settings = new Settings();
+            settings.setInitialWindowSize(3);
+            client.handshake().sendSettings(settings);
+            verifySettingsFrameWithAck();
+
+            // Initiate a request/response, and get some data back
+            client.sendHeaders(true, true, 1, createCommonHeaders());
+            var frame = client.awaitFrame(DataFrame.class);
+            assertTrue(frame.getDataLength() <= 3); // Server may send less
+
+            // Now update the initial window size to make the window size negative
+            settings.setInitialWindowSize(2);
+            client.sendSettings(settings);
+            verifySettingsFrameWithAck();
+
+            // Send a window increment of 2 to make it positive again
+            client.sendWindowUpdate(1, 2);
+
+            // Verify we get the data frame with size of 1
+            frame = client.awaitFrame(DataFrame.class);
+            assertEquals(1, frame.getDataLength());
+        }
+
+        /**
+         * An endpoint MUST treat a change to SETTINGS_INITIAL_WINDOW_SIZE that causes any flow-control window
+         * to exceed the maximum size as a connection error (Section 5.4.1) of type FLOW_CONTROL_ERROR.
+         */
+        @Test
+        @DisplayName("Sends a SETTINGS_INITIAL_WINDOW_SIZE settings with an exceeded maximum window size value")
+        void flowControlWindowCannotBeTooBig() throws IOException {
+            client.handshake()
+                    // Length:6, Type: SETTINGS, Flags: 0, StreamId: 0, Increment: 2147483648
+                    .send(new byte[] { 0x0, 0x0, 0x6, 0x4, 0x0, 0x0, 0x0, 0x0, 0x0 })
+                    .send(new int[] { 0x0, 0x4, 0x80, 0x0, 0x0, 0x0 });
+
+            verifyConnectionError(Http2ErrorCode.FLOW_CONTROL_ERROR);
+        }
+    }
+
+    @Nested
+    @DisplayName("Section 6.10 :: CONTINUATION")
+    @Tags({@Tag("6"), @Tag("6.10")})
+    final class ContinuationFrameTest extends SpecTest {
+        /**
+         * The CONTINUATION frame (type=0x9) is used to continue a sequence of header block fragments (Section 4.3).
+         * Any number of CONTINUATION frames can be sent, as long as the preceding frame is on the same stream and
+         * is a HEADERS, PUSH_PROMISE, or CONTINUATION frame without the END_HEADERS flag set.
+         */
+        @Test
+        @DisplayName("Sends multiple CONTINUATION frames preceded by a HEADERS frame")
+        void sendMultipleContinuationFrames() throws IOException {
+            client.handshake()
+                    .sendHeaders(false, true, 1, createCommonHeaders())
+                    .sendContinuation(false, 1, createDummyHeaders(10))
+                    .sendContinuation(true, 1, createDummyHeaders(10));
+
+            verifyHeadersFrame(1);
+        }
+
+        /**
+         * END_HEADERS (0x4):<br>
+         * If the END_HEADERS bit is not set, this frame MUST be followed by another CONTINUATION frame. A receiver
+         * MUST treat the receipt of any other type of frame or a frame on a different stream as a connection error
+         * (Section 5.4.1) of type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("Sends a CONTINUATION frame followed by any frame other than CONTINUATION")
+        void interleaveFrameWithUnfinishedContinuationsIsBad() throws IOException {
+            client.handshake()
+                    .sendHeaders(false, false, 1, createCommonHeaders().putMethod("POST"))
+                    .sendContinuation(false, 1, createDummyHeaders(10))
+                    .sendData(true, 1, randomString(15));
+
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+
+        /**
+         * CONTINUATION frames MUST be associated with a stream. If a CONTINUATION frame is received whose stream
+         * identifier field is 0x0, the recipient MUST respond with a connection error (Section 5.4.1) of type
+         * PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("Sends a CONTINUATION frame with 0x0 stream identifier")
+        void continuationFrameWithStream0() throws IOException {
+            client.handshake()
+                    .sendHeaders(false, true, 1, createCommonHeaders())
+                    // Length: 7, Type: CONTINUATION, Flags: End Stream, StreamId: 0, Data: random
+                    .send(new byte[] { 0x0, 0x0, 0x7, 0x9, 0x1, 0x0, 0x0, 0x0, 0x0 })
+                    // It would be better to make these real bytes... just to be sure
+                    .send(randomBytes(7));
+
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+
+        /**
+         * A CONTINUATION frame MUST be preceded by a HEADERS, PUSH_PROMISE or CONTINUATION frame without the
+         * END_HEADERS flag set. A recipient that observes violation of this rule MUST respond with a connection
+         * error (Section 5.4.1) of type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("Sends a CONTINUATION frame preceded by a CONTINUATION frame with END_HEADERS flag")
+        void continuationFrameAfterLastHeadersFrame() throws IOException {
+            client.handshake()
+                    .sendHeaders(false, true, 1, createCommonHeaders())
+                    .sendContinuation(true, 1, createDummyHeaders(1))
+                    .sendContinuation(true, 1, createDummyHeaders(1));
+
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+
+        /**
+         * A CONTINUATION frame MUST be preceded by a HEADERS, PUSH_PROMISE or CONTINUATION frame without the
+         * END_HEADERS flag set. A recipient that observes violation of this rule MUST respond with a connection
+         * error (Section 5.4.1) of type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("Sends a CONTINUATION frame preceded by a HEADERS frame with END_HEADERS flag")
+        void continuationFrameAfterLastContinuationFrame() throws IOException {
+            client.handshake()
+                    .sendHeaders(true, true, 1, createCommonHeaders())
+                    .sendContinuation(true, 1, createDummyHeaders(1));
+
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+
+        /**
+         * A CONTINUATION frame MUST be preceded by a HEADERS, PUSH_PROMISE or CONTINUATION frame without the
+         * END_HEADERS flag set. A recipient that observes violation of this rule MUST respond with a connection
+         * error (Section 5.4.1) of type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("Sends a CONTINUATION frame preceded by a DATA frame")
+        void continuationFrameAfterDataFrame() throws IOException {
+            client.handshake()
+                    .sendHeaders(true, false, 1, createCommonHeaders().putMethod("POST"))
+                    .sendData(true, 1, randomString(10))
+                    .sendContinuation(false, 1, createDummyHeaders(1));
+
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
         }
     }
 }

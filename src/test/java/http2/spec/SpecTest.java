@@ -81,6 +81,10 @@ abstract class SpecTest {
         return headers;
     }
 
+    protected Http2Headers createDummyHeaders(int numDummies) {
+        return createDummyHeaders(24, numDummies);
+    }
+
     /**
      * Queries the server at "/" for a document, and uses this to determine the length of the
      * data the server is willing to respond with. This uses a separate connection.

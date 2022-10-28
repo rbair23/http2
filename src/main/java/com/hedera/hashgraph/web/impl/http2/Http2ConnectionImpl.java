@@ -430,8 +430,8 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
                         case GO_AWAY -> handleGoAway();
                         // SPEC: 6.9 WINDOW_UPDATE
                         case WINDOW_UPDATE -> handleWindowUpdate();
-                        // SPEC: 6.10 CONTINUATION
-                        case CONTINUATION -> handleContinuationFrame();
+                        // SPEC: 6.10 CONTINUATION cannot be handled in this state!
+                        case CONTINUATION -> throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, inputBuffer.peek31BitInteger(5));
                         // SPEC: 4.1 Frame Format
                         // Implementations MUST ignore and discard frames of unknown types.
                         default -> skipUnknownFrame();
@@ -782,21 +782,9 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
 
         flowControlLock.lock();
         try {
-            // TODO ALL WRONG
             windowUpdateFrame.parse2(inputBuffer);
-            if (windowUpdateFrame.getStreamId() == 0) {
-                // SPEC 6.9.1
-                // A sender MUST NOT allow a flow-control window to exceed 231-1 octets. If a sender receives a WINDOW_UPDATE
-                // that causes a flow-control window to exceed this maximum, it MUST terminate either the stream or the
-                // connection, as appropriate. For streams, the sender sends a RST_STREAM with an error code of
-                // FLOW_CONTROL_ERROR; for the connection, a GOAWAY frame with an error code of FLOW_CONTROL_ERROR is sent.
-                final var wouldOverflow = (long) clientFlowControlCredits.get() + windowUpdateFrame.getWindowSizeIncrement() >= (1L << 31);
-                if (wouldOverflow) {
-                    throw new Http2Exception(Http2ErrorCode.FLOW_CONTROL_ERROR, 0);
-                }
 
-                clientFlowControlCredits.addAndGet(windowUpdateFrame.getWindowSizeIncrement());
-            } else {
+            if (windowUpdateFrame.getStreamId() > 0) {
                 // It is an error to receive an RST_STREAM frame for a stream that is already closed,
                 // or hasn't been opened.
                 final var streamId = checkStreamIsOdd(windowUpdateFrame.getStreamId());
@@ -808,9 +796,16 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
                 stream.handleWindowUpdateFrame(windowUpdateFrame);
             }
 
-            // TODO If we ignore these frames, then it is possible that when we're trying to flush
-            //      buffers to the client we are unable to send everything. So I think we should
-            //      continue to process these.
+            // SPEC 6.9.1
+            // A sender MUST NOT allow a flow-control window to exceed 231-1 octets. If a sender receives a WINDOW_UPDATE
+            // that causes a flow-control window to exceed this maximum, it MUST terminate either the stream or the
+            // connection, as appropriate. For streams, the sender sends a RST_STREAM with an error code of
+            // FLOW_CONTROL_ERROR; for the connection, a GOAWAY frame with an error code of FLOW_CONTROL_ERROR is sent.
+            final var wouldOverflow = (long) clientFlowControlCredits.get() + windowUpdateFrame.getWindowSizeIncrement() >= (1L << 31);
+            if (wouldOverflow) {
+                throw new Http2Exception(Http2ErrorCode.FLOW_CONTROL_ERROR, 0);
+            }
+            clientFlowControlCredits.addAndGet(windowUpdateFrame.getWindowSizeIncrement());
         } finally {
             flowControlLock.unlock();
         }
@@ -856,11 +851,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
         // or the stream has not yet been opened.
         final var stream = streams.get(streamId);
         if (stream == null) {
-            if (streamId <= highestStreamId) {
-                throw new Http2Exception(Http2ErrorCode.STREAM_CLOSED, streamId);
-            } else {
-                throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
-            }
+            throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
         }
 
         // Delegate to the stream to handle the continuation frame. If the stream throws an Http2Exception,
