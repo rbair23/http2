@@ -135,8 +135,6 @@ public class Section6SpecTest {
         @Test
         @DisplayName("Sends a HEADERS frame with invalid pad length")
         void sendHeadersFrameWithInvalidPadLength() throws IOException {
-            final var streamId = 1;
-            final var headers = (Http2Headers) createCommonHeaders().putMethod("POST").put("content-length", "4");
             client.handshake()
                     // Length: 0, Type: HEADERS, Flags: Padded and EndHeaders and EndStream, StreamId: 1
                     .send(new byte[] { 0x0, 0x0, 0x4, 0x1, 0xD, 0x0, 0x0, 0x0, 0x1 })
