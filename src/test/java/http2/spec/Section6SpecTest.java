@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @DisplayName("Section 6 :: Frame Definitions")
-@Tag("4")
+@Tag("6")
 public class Section6SpecTest {
 
     @Nested

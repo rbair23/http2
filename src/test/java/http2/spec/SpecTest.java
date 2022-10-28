@@ -120,6 +120,22 @@ abstract class SpecTest {
         assertArrayEquals(data, frame.getData());
     }
 
+    protected void verifyPingFrameOrConnectionClose(byte[] data) throws IOException {
+        while (!client.connectionClosed()) {
+            final var frame = client.awaitFrame(Frame.class);
+            if (frame == null) {
+                // A null frame means the connection was closed. Which is a good thing in this case.
+                return;
+            } if (frame instanceof PingFrame pingFrame) {
+                if (pingFrame.isAck() && Arrays.equals(data, pingFrame.getData())) {
+                    return;
+                }
+            }
+        }
+
+        assertTrue(client.connectionClosed());
+    }
+
     protected void verifySettingsFrameWithAck() throws IOException {
         final var frame = client.awaitFrame(SettingsFrame.class);
         assertTrue(frame.isAck());
