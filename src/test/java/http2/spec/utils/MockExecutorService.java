@@ -35,6 +35,6 @@ public class MockExecutorService extends AbstractExecutorService {
 
     @Override
     public void execute(@NotNull Runnable command) {
-
+        command.run();
     }
 }

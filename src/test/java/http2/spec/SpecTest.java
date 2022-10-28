@@ -81,10 +81,44 @@ abstract class SpecTest {
         return headers;
     }
 
+    /**
+     * Queries the server at "/" for a document, and uses this to determine the length of the
+     * data the server is willing to respond with. This uses a separate connection.
+     *
+     * @return zero or more
+     */
+    protected int serverDataLength() throws IOException {
+        final var c = new DirectClientConnection(1, TimeUnit.SECONDS);
+        c.handshake().sendHeaders(true, true, 1, createCommonHeaders());
+        int len = 0;
+        while (true) {
+            final var frame = c.awaitFrame(Frame.class);
+            if (frame == null) {
+                break;
+            } else if (frame instanceof DataFrame f) {
+                len += f.getDataLength();
+                if (f.isEndStream()) {
+                    break;
+                }
+            } else if (frame instanceof HeadersFrame f) {
+                if (f.isEndStream()) {
+                    break;
+                }
+            }
+        }
+
+        return len;
+    }
+
     protected void verifyPingFrameWithAck(byte[] data) throws IOException {
         final var frame = client.awaitFrame(PingFrame.class);
         assertTrue(frame.isAck());
         assertArrayEquals(data, frame.getData());
+    }
+
+    protected void verifySettingsFrameWithAck() throws IOException {
+        final var frame = client.awaitFrame(SettingsFrame.class);
+        assertTrue(frame.isAck());
     }
 
     protected void verifyHeadersFrame(int streamId) throws IOException {

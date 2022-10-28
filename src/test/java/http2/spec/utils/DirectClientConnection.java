@@ -1,5 +1,6 @@
 package http2.spec.utils;
 
+import com.hedera.hashgraph.web.StatusCode;
 import com.hedera.hashgraph.web.WebHeaders;
 import com.hedera.hashgraph.web.WebRoutes;
 import com.hedera.hashgraph.web.WebServerConfig;
@@ -21,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.LinkedList;
 import java.util.NoSuchElementException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -297,7 +299,16 @@ public class DirectClientConnection implements ClientConnection {
 
         public Server() {
             final var routes = new WebRoutes();
-            threadPool = new MockExecutorService();
+            routes.get("/", (req, res) -> {
+                res.statusCode(StatusCode.OK_200)
+                        .respond("text/plain", "I am sending some bytes");
+            });
+            routes.post("/", (req, res) -> {
+                final byte[] data = req.getRequestBody().readAllBytes();
+                res.respond(StatusCode.OK_200);
+            });
+
+            threadPool = Executors.newCachedThreadPool();
             final var dispatcher = new Dispatcher(routes, threadPool);
             final var config = new WebServerConfig.Builder()
                     .maxConcurrentStreamsPerConnection(TEST_MAX_CONCURRENT_STREAMS_PER_CONNECTION)

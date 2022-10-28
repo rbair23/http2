@@ -2,12 +2,16 @@ package http2.spec;
 
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Headers;
-import com.hedera.hashgraph.web.impl.http2.frames.HeadersFrame;
+import com.hedera.hashgraph.web.impl.http2.frames.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @DisplayName("Section 6 :: Frame Definitions")
 @Tag("4")
@@ -257,7 +261,7 @@ public class Section6SpecTest {
          * PROTOCOL_ERROR.
          */
         @ParameterizedTest
-        @ValueSource(ints = { 1, 2, 10 })
+        @ValueSource(ints = { 1, 3, 11 })
         @DisplayName("Sends a SETTINGS frame with a stream identifier other than 0x0")
         void sendSettingsWithNonZeroStreamId(int streamId) throws IOException {
             client.handshake()
@@ -371,6 +375,125 @@ public class Section6SpecTest {
                     .send(randomBytes(8));
 
             verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+    }
+
+    @Nested
+    @DisplayName("Section 6.9 :: WINDOW_UPDATE")
+    @Tags({@Tag("6"), @Tag("6.9")})
+    final class WindowUpdateFrameTest extends SpecTest {
+        /**
+         * A receiver MUST treat the receipt of a WINDOW_UPDATE frame with a flow-control window increment of 0 as
+         * a stream error (Section 5.4.2) of type PROTOCOL_ERROR; errors on the connection flow-control window MUST
+         * be treated as a connection error (Section 5.4.1).
+         */
+        @Test
+        @DisplayName("Sends a WINDOW_UPDATE frame with a flow control window increment of 0")
+        void sendWindowUpdateToConnectionWithFlowControlIncrementOf0() throws IOException {
+            client.handshake()
+                    // Length:4, Type: WINDOW_UPDATE, Flags: 0, StreamId: 0, Increment: 0
+                    .send(new byte[] { 0x0, 0x0, 0x4, 0x8, 0x0, 0x0, 0x0, 0x0, 0x0 })
+                    .send(new byte[] { 0x0, 0x0, 0x0, 0x0 });
+
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+
+        /**
+         * A receiver MUST treat the receipt of a WINDOW_UPDATE frame with a flow-control window increment of 0 as
+         * a stream error (Section 5.4.2) of type PROTOCOL_ERROR; errors on the connection flow-control window MUST
+         * be treated as a connection error (Section 5.4.1).
+         */
+        @Test
+        @DisplayName("Sends a WINDOW_UPDATE frame with a flow control window increment of 0 on a stream")
+        void sendWindowUpdateToStreamWithFlowControlIncrementOf0() throws IOException {
+            client.handshake()
+                    .sendHeaders(true, false, 1, createCommonHeaders())
+                    // Length:4, Type: WINDOW_UPDATE, Flags: 0, StreamId: 1, Increment: 0
+                    .send(new byte[] { 0x0, 0x0, 0x4, 0x8, 0x0, 0x0, 0x0, 0x0, 0x1 })
+                    .send(new byte[] { 0x0, 0x0, 0x0, 0x0 });
+
+            verifyStreamError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+
+        /**
+         * A WINDOW_UPDATE frame with a length other than 4 octets MUST be treated as a connection error
+         * (Section 5.4.1) of type FRAME_SIZE_ERROR.
+         */
+        @ParameterizedTest
+        @ValueSource(bytes = { 1, 2, 3, 5, 6, 7, 8 })
+        @DisplayName("Sends a WINDOW_UPDATE frame with a length other than 4 octets")
+        void sendWindowUpdateWithWrongFrameSize(byte length) throws IOException {
+            client.handshake()
+                    // Length:Variable, Type: WINDOW_UPDATE, Flags: 0, StreamId: 0, Increment: 1
+                    .send(new byte[] { 0x0, 0x0, length, 0x8, 0x0, 0x0, 0x0, 0x0, 0x0 })
+                    // NOTE: Technically the random bytes could be all zeros, which would fail for
+                    // a different reason than this test exists for, so I will pick length - 1
+                    // random bytes and send one final byte of 0x1, so I know the value wasn't 0.
+                    .send(randomBytes(length - 1))
+                    .send(new byte[] { 0x1 });
+
+            verifyConnectionError(Http2ErrorCode.FRAME_SIZE_ERROR);
+        }
+    }
+
+    @Nested
+    @DisplayName("Section 6.9.1 :: The Flow-Control Window")
+    @Tags({@Tag("6"), @Tag("6.9"), @Tag("6.9.1")})
+    final class FlowControlWindowTest extends SpecTest {
+        /**
+         * The sender MUST NOT send a flow-controlled frame with a length that exceeds the space available in
+         * either of the flow-control windows advertised by the receiver.
+         */
+        @Test
+        @DisplayName("Sends SETTINGS frame to set the initial window size to 1 and sends HEADERS frame")
+        void sendSettingsWithSmallInitialWindowSizeFollowedByHeaders() throws IOException {
+            final var len = serverDataLength();
+            assumeTrue(len > 0);
+
+            final var settings = new Settings();
+            settings.setInitialWindowSize(1);
+            client.handshake().sendSettings(settings);
+
+            verifySettingsFrameWithAck();
+
+            client.sendHeaders(true, true, 1, createCommonHeaders());
+            final var frame = client.awaitFrame(DataFrame.class);
+            assertEquals(1, frame.getDataLength());
+        }
+
+        /**
+         * A sender MUST NOT allow a flow-control window to exceed 2^31-1 octets. If a sender receives a
+         * WINDOW_UPDATE that causes a flow-control window to exceed this maximum, it MUST terminate either
+         * the stream or the connection, as appropriate. For streams, the sender sends a RST_STREAM with an
+         * error code of FLOW_CONTROL_ERROR; for the connection, a GOAWAY frame with an error code of
+         * FLOW_CONTROL_ERROR is sent.
+         */
+        @Test
+        @DisplayName("Sends multiple WINDOW_UPDATE frames increasing the flow control window to above 2^31-1")
+        void makeWindowFlowControlTooBig() throws IOException {
+            client.handshake()
+                    .sendWindowUpdate(0, (1 << 31) - 1)
+                    .sendWindowUpdate(0, 1);
+            final var frame = client.awaitFrame(GoAwayFrame.class);
+            assertNotNull(frame);
+        }
+
+        /**
+         * A sender MUST NOT allow a flow-control window to exceed 2^31-1 octets. If a sender receives a
+         * WINDOW_UPDATE that causes a flow-control window to exceed this maximum, it MUST terminate either
+         * the stream or the connection, as appropriate. For streams, the sender sends a RST_STREAM with an
+         * error code of FLOW_CONTROL_ERROR; for the connection, a GOAWAY frame with an error code of
+         * FLOW_CONTROL_ERROR is sent.
+         */
+        @Test
+        @DisplayName("Sends multiple WINDOW_UPDATE frames increasing the flow control window to above 2^31-1 on a stream")
+        void makeWindowFlowControlTooBigOnAStream() throws IOException {
+            client.handshake()
+                    .sendHeaders(true, false, 1, createCommonHeaders())
+                    .sendWindowUpdate(1, (1 << 31) - 1)
+                    .sendWindowUpdate(1, 1);
+            final var frame = client.awaitFrame(RstStreamFrame.class);
+            assertNotNull(frame);
         }
     }
 }
