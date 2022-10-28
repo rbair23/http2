@@ -5,12 +5,12 @@ import org.junit.jupiter.api.*;
 
 import java.io.IOException;
 
-@DisplayName("Section 4. HTTP Frames")
+@DisplayName("Section 4 :: HTTP Frames")
 @Tag("4")
 public class FramesSpecTest {
 
     @Nested
-    @DisplayName("Section 4.1 Frame Format")
+    @DisplayName("Section 4.1 :: Frame Format")
     @Tags({@Tag("4"), @Tag("4.1")})
     final class FrameFormatTest extends SpecTest {
         /**
@@ -72,7 +72,7 @@ public class FramesSpecTest {
     }
 
     @Nested
-    @DisplayName("Section 4.2 Frame Size")
+    @DisplayName("Section 4.2 :: Frame Size")
     @Tags({@Tag("4"), @Tag("4.2")})
     final class FrameSizeTest extends SpecTest {
         /**
@@ -126,7 +126,7 @@ public class FramesSpecTest {
     }
 
     @Nested
-    @DisplayName("Section 4.3 Header Compression and Decompression")
+    @DisplayName("Section 4.3 :: Header Compression and Decompression")
     @Tags({@Tag("4"), @Tag("4.3")})
     final class HeaderCompressionAndDecompressionTest extends SpecTest {
 

@@ -218,7 +218,6 @@ public abstract class ConnectionContext implements AutoCloseable {
     public void close() {
         System.out.println("ConnectionContext.close");
         if (!closed) {
-            new Exception().printStackTrace(System.out);
             this.closed = true;
             if (!channel.isOpen()) {
                 // the channel is already closed so just close immediately as we can not finish sending data
@@ -246,7 +245,6 @@ public abstract class ConnectionContext implements AutoCloseable {
      */
     protected void terminate() {
         System.out.println("ConnectionContext.terminate");
-        new Exception().printStackTrace(System.out);
         if (channel != null && channel.isOpen()) {
             try {
                 this.channel.close();

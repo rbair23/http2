@@ -5,6 +5,7 @@ import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.Http2Headers;
 import com.hedera.hashgraph.web.impl.http2.frames.Frame;
 import com.hedera.hashgraph.web.impl.http2.frames.FrameType;
+import com.hedera.hashgraph.web.impl.http2.frames.Settings;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -16,6 +17,7 @@ import java.nio.charset.StandardCharsets;
  */
 public interface ClientConnection {
     int maxFrameSize();
+    Settings serverSettings();
     boolean connectionClosed();
 
     ClientConnection handshake() throws IOException;
@@ -28,6 +30,7 @@ public interface ClientConnection {
     ClientConnection sendContinuation(boolean endHeaders, int streamId, Http2Headers headers) throws IOException;
     ClientConnection sendRstStream(int streamId, Http2ErrorCode code) throws IOException;
     ClientConnection sendWindowUpdate(int streamId, int windowIncrement) throws IOException;
+    ClientConnection sendSettings(Settings settings) throws IOException;
 
     <F extends Frame> F awaitFrame(Class<F> clazz) throws IOException;
 

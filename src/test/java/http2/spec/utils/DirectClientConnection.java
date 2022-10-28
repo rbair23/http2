@@ -29,6 +29,7 @@ public class DirectClientConnection implements ClientConnection {
     private OutputBuffer outputBuffer;
     private InputBuffer inputBuffer;
     private Server server;
+    private Settings serverSettings;
     private LinkedList<Frame> receivedFrames = new LinkedList<>();
     private Http2HeaderCodec codec = new Http2HeaderCodec(new Encoder(4096), new Decoder(4096, 4096));
 
@@ -50,6 +51,11 @@ public class DirectClientConnection implements ClientConnection {
     }
 
     @Override
+    public Settings serverSettings() {
+        return serverSettings;
+    }
+
+    @Override
     public boolean connectionClosed() {
         return !clientChannel.isOpen();
     }
@@ -62,6 +68,16 @@ public class DirectClientConnection implements ClientConnection {
         final var ignored = awaitFrame(SettingsFrame.class);
         sendSettingsAck(serverSettingsFrame);
         sendAndReceive();
+
+        serverSettings = new Settings();
+        serverSettings.setMaxHeaderListSize(serverSettingsFrame.getMaxHeaderListSize());
+        serverSettings.setMaxConcurrentStreams(serverSettingsFrame.getMaxConcurrentStreams());
+        serverSettings.setMaxFrameSize(serverSettingsFrame.getMaxFrameSize());
+        serverSettings.setEnablePush(serverSettingsFrame.isEnablePush());
+        serverSettings.setInitialWindowSize(serverSettingsFrame.getInitialWindowSize());
+        serverSettings.setHeaderTableSize(serverSettingsFrame.getHeaderTableSize());
+
+        // TODO rebuild the code possibly
         return this;
     }
 
@@ -126,6 +142,7 @@ public class DirectClientConnection implements ClientConnection {
         return send(new WindowUpdateFrame(streamId, windowIncrement));
     }
 
+    @Override
     public DirectClientConnection sendSettings(Settings settings) throws IOException {
         return send(new SettingsFrame(settings));
     }
@@ -140,12 +157,15 @@ public class DirectClientConnection implements ClientConnection {
         final var startTime = System.currentTimeMillis();
         final var endTime = startTime + timeoutUnit.toMillis(timeout);
         while (endTime > System.currentTimeMillis()) {
+            // Give the server a chance to send more data to the client
             sendAndReceive();
 
-            if (connectionClosed()) {
+            // If there is no chance of finding the frame I want, then return null
+            if (receivedFrames.isEmpty() && connectionClosed()) {
                 return null;
             }
 
+            // Grab the next frame. If there isn't one, sleep for a bit
             final var frame = receivedFrames.poll();
             if (frame == null) {
                 try {
@@ -154,12 +174,15 @@ public class DirectClientConnection implements ClientConnection {
                 }
                 continue;
             }
+
+            // Is the frame the type I'm looking for?
             if (clazz.isAssignableFrom(frame.getClass())) {
                 //noinspection unchecked
                 return (F) frame;
             }
         }
 
+        clientChannel.close();
         throw new AssertionError("Unable to find " + clazz.getSimpleName() + " in " + timeout + " " + timeoutUnit);
     }
 
@@ -190,38 +213,44 @@ public class DirectClientConnection implements ClientConnection {
 //    }
 
     public void sendAndReceive() throws IOException {
-        final ByteBuffer buffer = outputBuffer.getBuffer();
-        buffer.flip();
-        clientChannel.write(buffer);
-        buffer.clear();
-        clientChannel.sendTo(server.serverChannel);
+        if (server.serverChannel.isOpen()) {
+            final ByteBuffer buffer = outputBuffer.getBuffer();
+            buffer.flip();
+            clientChannel.write(buffer);
+            buffer.clear();
+            clientChannel.sendTo(server.serverChannel);
 
-        server.http2Connection.handleIncomingData(s -> {});
-        server.http2Connection.handleOutgoingData();
-        server.send();
+            server.http2Connection.handleIncomingData(s -> {});
+            server.http2Connection.handleOutgoingData();
+            server.send();
 
-        while (inputBuffer.available(9)) {
-            final var ord = inputBuffer.peekByte(3);
-            final var type = FrameType.valueOf(ord);
-            final Frame frame = switch (type) {
-                case DATA -> new DataFrame();
-                case CONTINUATION -> new ContinuationFrame();
-                case PING -> new PingFrame();
-                case GO_AWAY -> new GoAwayFrame();
-                case HEADERS -> new HeadersFrame();
-                case PRIORITY -> new PriorityFrame();
-                case RST_STREAM -> new RstStreamFrame();
-                case SETTINGS -> new SettingsFrame();
-                case WINDOW_UPDATE -> new WindowUpdateFrame();
-                default -> null;
-            };
+            while (inputBuffer.available(9)) {
+                final var ord = inputBuffer.peekByte(3);
+                final var type = FrameType.valueOf(ord);
+                final Frame frame = switch (type) {
+                    case DATA -> new DataFrame();
+                    case CONTINUATION -> new ContinuationFrame();
+                    case PING -> new PingFrame();
+                    case GO_AWAY -> new GoAwayFrame();
+                    case HEADERS -> new HeadersFrame();
+                    case PRIORITY -> new PriorityFrame();
+                    case RST_STREAM -> new RstStreamFrame();
+                    case SETTINGS -> new SettingsFrame();
+                    case WINDOW_UPDATE -> new WindowUpdateFrame();
+                    default -> null;
+                };
 
-            if (frame != null) {
-                frame.parse2(inputBuffer);
-                receivedFrames.add(frame);
-            } else {
-                inputBuffer.skip(9 + inputBuffer.peek24BitInteger());
+                if (frame != null) {
+                    frame.parse2(inputBuffer);
+                    receivedFrames.add(frame);
+                } else {
+                    inputBuffer.skip(9 + inputBuffer.peek24BitInteger());
+                }
             }
+        }
+
+        if (!server.serverChannel.isOpen()) {
+            clientChannel.close();
         }
     }
 

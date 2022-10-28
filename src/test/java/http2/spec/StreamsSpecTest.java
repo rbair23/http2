@@ -1,25 +1,28 @@
 package http2.spec;
 
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
-import com.hedera.hashgraph.web.impl.http2.frames.FrameType;
 import com.hedera.hashgraph.web.impl.http2.frames.GoAwayFrame;
+import com.hedera.hashgraph.web.impl.http2.frames.HeadersFrame;
+import com.hedera.hashgraph.web.impl.http2.frames.Settings;
 import org.junit.jupiter.api.*;
 
 import java.io.IOException;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static com.hedera.hashgraph.web.impl.http2.frames.Settings.DEFAULT_MAX_CONCURRENT_STREAMS;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * A series of tests for Section 5 of the specification, "Streams and Multiplexing".
  */
-@DisplayName("Section 5. Streams and Multiplexing")
+@DisplayName("Section 5 :: Streams and Multiplexing")
 @Tag("5")
 class StreamsSpecTest extends SpecTest {
 
     @Nested
-    @DisplayName("Section 5.1 Stream States")
+    @DisplayName("Section 5.1 :: Stream States")
     @Tags({@Tag("5"), @Tag("5.1")})
-    final class FrameFormatTest extends SpecTest {
+    final class StreamStatesTest extends SpecTest {
         /**
          * idle: Receiving any frame other than HEADERS or PRIORITY on a stream in this state MUST be treated
          * as a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
@@ -204,6 +207,187 @@ class StreamsSpecTest extends SpecTest {
         }
     }
 
+    @Nested
+    @DisplayName("Section 5.1.1 :: Stream Identifiers")
+    @Tags({@Tag("5"), @Tag("5.1"), @Tag("5.1.1")})
+    final class StreamIdentifiersTest extends SpecTest {
+        /**
+         * An endpoint that receives an unexpected stream identifier MUST respond with a connection error
+         * (Section 5.4.1) of type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("Sends even-numbered stream identifier")
+        void sendEvenNumberedStreamId() throws IOException {
+            client.handshake().sendHeaders(true, true, 2, createCommonHeaders());
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+
+        /**
+         * An endpoint that receives an unexpected stream identifier MUST respond with a connection error
+         * (Section 5.4.1) of type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("Sends stream identifier that is numerically smaller than previous")
+        void sendSmallerStreamId() throws IOException {
+            client.handshake()
+                    .sendHeaders(true, true, 5, createCommonHeaders())
+                    .sendHeaders(true, true, 3, createCommonHeaders());
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+
+        /**
+         * An endpoint that receives an unexpected stream identifier MUST respond with a connection error
+         * (Section 5.4.1) of type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("Sends stream identifier that is 0")
+        void sendZeroStreamId() throws IOException {
+            client.handshake()
+                    // Length: 0, Type: HEADERS, Flags: End Stream, End Headers, StreamID: 0
+                    .send(new byte[] { 0x0, 0x0, 0x0, 0x1, 0b0000_0101, 0x0, 0x0, 0x0, 0x0 });
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+    }
+
+    @Nested
+    @DisplayName("Section 5.1.2 :: Stream Concurrency")
+    @Tags({@Tag("5"), @Tag("5.1"), @Tag("5.1.2")})
+    final class StreamConcurrencyTest extends SpecTest {
+        /**
+         * An endpoint that receives a HEADERS frame that causes its advertised concurrent stream limit to be exceeded
+         * MUST treat this as a stream error (Section 5.4.2) of type PROTOCOL_ERROR or REFUSED_STREAM.
+         */
+        @Test
+        @DisplayName("Sends HEADERS frames that causes their advertised concurrent stream limit to be exceeded")
+        void exceedConcurrentStreamLimit() throws IOException {
+            client.handshake();
+
+            // Don't bother running this test if the max concurrent streams is huge. Since it is often
+            // set to the default setting, we can just check that (because it is unlikely the server chose
+            // an unreasonably large value other than MAX)
+            final var maxStreams = client.serverSettings().getMaxConcurrentStreams();
+            assumeTrue(maxStreams < DEFAULT_MAX_CONCURRENT_STREAMS);
+
+            // Set INITIAL_WINDOW_SIZE to zero to prevent the peer from closing the stream.
+            final var settings = new Settings();
+            settings.setInitialWindowSize(0);
+            client.sendSettings(settings);
+
+            // Create one more stream than the limit
+            for (int i = 0; i < maxStreams + 1; i++) {
+                client.sendHeaders(true, false, 1 + (2 * i), createCommonHeaders());
+            }
+
+            verifyStreamError(Http2ErrorCode.REFUSED_STREAM, Http2ErrorCode.PROTOCOL_ERROR);
+        }
+    }
+
+    @Nested
+    @DisplayName("Section 5.3.1 :: Stream Dependencies")
+    @Tags({@Tag("5"), @Tag("5.3"), @Tag("5.3.1")})
+    final class StreamDependencyTest extends SpecTest {
+        /**
+         * A stream cannot depend on itself. An endpoint MUST treat this as a stream error (Section 5.4.2) of
+         * type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("Sends HEADERS frame that depends on itself")
+        void sendHeadersThatDependsOnItself() throws IOException {
+            client.handshake()
+                    // Length: 0, Type: HEADERS, Flags: Priority, End Stream, End Headers, StreamID: 1,
+                    // Exclusive: false, Stream Dep: 1, Weight: 127
+                    .send(new byte[] { 0x0, 0x0, 0x0, 0x1, 0b0010_0101, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x1, 0x7F });
+
+            verifyStreamError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+
+        /**
+         * A stream cannot depend on itself. An endpoint MUST treat this as a stream error (Section 5.4.2) of
+         * type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("Sends PRIORITY frame that depends on itself")
+        void sendPriorityThatDependsOnItself() throws IOException {
+            client.handshake().sendPriority(1, 1, false, 255);
+            verifyStreamError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+    }
+
+    @Nested
+    @DisplayName("Section 5.4.1 :: Connection Error Handling")
+    @Tags({@Tag("5"), @Tag("5.4"), @Tag("5.4.1")})
+    final class ConnectionErrorHandlingTest extends SpecTest {
+        /**
+         * After sending the GOAWAY frame for an error condition, the endpoint MUST close the TCP connection.
+         */
+        @Test
+        @DisplayName("Sends an invalid PING frame for connection close")
+        void sendBadPingAndCloseConnection() throws IOException {
+            client.handshake()
+                    // Send invalid PING (target is stream 3 instead of stream 0)
+                    .send(new byte[] { 0x0, 0x0, 0x8, 0x6, 0x0, 0x0, 0x0, 0x0, 0x3 })
+                    .send(new byte[] { 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 });
+
+            verifyConnectionClosed();
+        }
+
+        /**
+         * An endpoint that encounters a connection error SHOULD first send a GOAWAY frame (Section 6.8) with
+         * the stream identifier of the last stream that it successfully received from its peer.
+         */
+        @Test
+        @DisplayName("Sends an invalid PING frame to receive GOAWAY frame")
+        void SendBadPingGetsGoAway() throws IOException {
+            client.handshake()
+                    // Send invalid PING (target is stream 3 instead of stream 0)
+                    .send(new byte[] { 0x0, 0x0, 0x8, 0x6, 0x0, 0x0, 0x0, 0x0, 0x3 })
+                    .send(new byte[] { 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 });
+
+            assertNotNull(client.awaitFrame(GoAwayFrame.class), "GOAWAY frame not found");
+        }
+    }
+
+    @Nested
+    @DisplayName("Section 5.5 :: Extending HTTP/2")
+    @Tags({@Tag("5"), @Tag("5.5")})
+    final class ExtendingHttp2Test extends SpecTest {
+        /**
+         * Implementations MUST ignore unknown or unsupported values in all extensible protocol elements.
+         * Note: This test case is duplicated with 4.1.
+         */
+        @Test
+        @DisplayName("Sends an unknown extension frame")
+        void sendFrameWithUnknownType() throws IOException {
+            final var pingData = randomBytes(8);
+            client.handshake()
+                    // Length: 8, Type: 255, Flags: 0, R: 0, StreamID: 0
+                    .send(new byte[] { 0x0, 0x0, 0x8, 0x16, 0x0, 0x0, 0x0, 0x0, 0x0 })
+                    // Random 8 bytes of payload for the Unknown frame
+                    .send(randomBytes(8))
+                    .sendPing(false, pingData);
+
+            // Look for the ack ping frame
+            verifyPingFrameWithAck(pingData);
+        }
+
+        /**
+         * Extension frames that appear in the middle of a header block (Section 4.3) are not permitted; these
+         * MUST be treated as a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
+         */
+        @Test
+        @DisplayName("Sends an unknown extension frame in the middle of a header block")
+        void sendUnknownExtensionInHeaderBlock() throws IOException {
+            final var streamId = 1;
+            client.handshake()
+                    .sendHeaders(false, true, streamId, createCommonHeaders())
+                    // Length: 8, Type: 255, Flags: 0, R: 0, StreamID: 0
+                    .send(new byte[] { 0x0, 0x0, 0x8, 0x16, 0x0, 0x0, 0x0, 0x0, 0x0 })
+                    .send(randomBytes(8));
+
+            verifyConnectionError(Http2ErrorCode.PROTOCOL_ERROR);
+        }
+    }
+
     // Opening a stream with a higher-valued stream identifier causes the stream to transition immediately to a
     // "closed" state; note that this transition is not shown in the diagram.
     //
@@ -231,16 +415,6 @@ class StreamsSpecTest extends SpecTest {
     //            STREAM_CLOSED
     //         + A stream in this state will be closed if sent RST_STREAM
 
-//    @Test
-//    void something() throws IOException {
-//        // Initializes the connection.
-//        client.initializeConnection();
-//
-//        client.data(1, false, new byte[0]).sendAndReceive();
-//        final var goAway = client.receiveGoAway();
-//        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
-//    }
-
     // .... LOTS MORE
 
     // SPEC: 5.1.1 Stream Identifiers
@@ -257,37 +431,6 @@ class StreamsSpecTest extends SpecTest {
     //     - Create a Header with an even numbered ID and watch it fail with PROTOCOL_ERROR!
     //     - Also, with a streamId of 0!
     //     - Create a Header with a higher numbered ID and then create a Header with a lowered number ID
-
-//    @Test
-//    void headerWithStreamId0Fails() throws IOException {
-//        // Initializes the connection.
-//        client.initializeConnection();
-//        client.submit(FrameType.HEADERS, (byte) 0b0000_0100, 0, null).sendAndReceive();
-//        final var goAway = client.receive(GoAwayFrame.class);
-//        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
-//    }
-//
-//    @Test
-//    void headerWithStreamIdEvenFails() throws IOException {
-//        // Initializes the connection.
-//        client.initializeConnection();
-//        client.submitEmptyHeaders(2).sendAndReceive();
-//        final var goAway = client.receive(GoAwayFrame.class);
-//        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
-//    }
-//
-//    // TODO I'm not sure this should actually fail. Just transitions to "closed" right away.
-//    //      Does that mean a response comes back?
-//    @Test
-//    void headerWithLowerStreamIdFails() throws IOException {
-//        // Initializes the connection.
-//        client.initializeConnection();
-//        client.submitEmptyHeaders(11).sendAndReceive();
-//        assertFalse(client.framesReceived());
-//        client.submitEmptyHeaders(3).sendAndReceive();
-//        final var goAway = client.receive(GoAwayFrame.class);
-//        assertEquals(Http2ErrorCode.PROTOCOL_ERROR, goAway.getErrorCode());
-//    }
 
     // SPEC: 5.1.2 Stream Concurrency
     // A peer can limit the number of concurrently active streams using the SETTINGS_MAX_CONCURRENT_STREAMS
@@ -310,7 +453,4 @@ class StreamsSpecTest extends SpecTest {
     //     - Try to open more streams than allowed
     //     - Max out the number of connections, then let some of them enter "closed" state, then add more
 
-    // TODO Flow Control
-
-    // TODO Prioritization
 }

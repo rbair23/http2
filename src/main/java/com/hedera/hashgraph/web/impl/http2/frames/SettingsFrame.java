@@ -85,12 +85,29 @@ public final class SettingsFrame extends Frame {
         // The stream for settings is ALWAYS 0
         super(FrameType.SETTINGS);
         if (settings != null) {
-            setEnablePush(settings.isEnablePush());
-            setHeaderTableSize(settings.getHeaderTableSize());
-            setInitialWindowSize(settings.getInitialWindowSize());
-            setMaxConcurrentStreams(settings.getMaxConcurrentStreams());
-            setMaxFrameSize(settings.getMaxFrameSize());
-            setMaxHeaderListSize(settings.getMaxHeaderListSize());
+            if (settings.isEnablePush() != DEFAULT_ENABLE_PUSH) {
+                setEnablePush(settings.isEnablePush());
+            }
+
+            if (settings.getHeaderTableSize() != DEFAULT_HEADER_TABLE_SIZE) {
+                setHeaderTableSize(settings.getHeaderTableSize());
+            }
+
+            if (settings.getInitialWindowSize() != DEFAULT_INITIAL_WINDOW_SIZE) {
+                setInitialWindowSize(settings.getInitialWindowSize());
+            }
+
+            if (settings.getMaxConcurrentStreams() != DEFAULT_MAX_CONCURRENT_STREAMS) {
+                setMaxConcurrentStreams(settings.getMaxConcurrentStreams());
+            }
+
+            if (settings.getMaxFrameSize() != DEFAULT_MAX_FRAME_SIZE) {
+                setMaxFrameSize(settings.getMaxFrameSize());
+            }
+
+            if (settings.getMaxHeaderListSize() != DEFAULT_MAX_HEADER_LIST_SIZE) {
+                setMaxHeaderListSize(settings.getMaxHeaderListSize());
+            }
         }
     }
 

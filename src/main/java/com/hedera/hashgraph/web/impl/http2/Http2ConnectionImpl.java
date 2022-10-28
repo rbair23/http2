@@ -305,8 +305,6 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
                     penaltyCount--;
                 }
             }
-
-            return; // response;
         } catch (Http2Exception e) {
             // SPEC: 5.4.1 Connection Error Handling
             // An endpoint that encounters a connection error SHOULD first send a GOAWAY frame (Section 6.8) with the
@@ -326,12 +324,10 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             // or graceful shutdown of the connection. Because we use NIO, we have to keep the channel
             // open long enough to flush whatever we have in our output buffers out to the client
             // (or they'd never get the GOAWAY frame!), but otherwise the connection should be torn down.
-            state = State.CLOSED;
-            return; // HandleResponse.CLOSE_CONNECTION;
+            close();
         } catch (BadClientException e) {
             // The client was bad, wracked up too many penalties, so we're going to close it down hard.
-            state = State.CLOSED;
-            return; // HandleResponse.CLOSE_CONNECTION;
+            close();
         }
     }
 
@@ -505,7 +501,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
 
         // No matter what happens with this Data frame, report back that we have space
         // for more data frames.
-        sendWindowUpdateFrame(dataFrame.getDataLength()); // TODO or is it payload length?
+        sendWindowUpdateFrame(dataFrame.getDataLength());
 
         // SPEC 6.8 GOAWAY
         // After sending a GOAWAY frame, the sender can discard frames for streams initiated by the receiver with
@@ -583,8 +579,7 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             // streams that are reserved using PUSH_PROMISE. An endpoint that receives an unexpected stream identifier MUST
             // respond with a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
             if (streamId <= highestStreamId) {
-                // TODO Conflicting info. 5.1.1 says PROTOCOL_ERROR, spec test says STREAM_CLOSED
-                throw new Http2Exception(Http2ErrorCode.STREAM_CLOSED, streamId);
+                throw new Http2Exception(Http2ErrorCode.PROTOCOL_ERROR, streamId);
             }
 
             // This should absolutely not be possible because the stream ID has to be strictly

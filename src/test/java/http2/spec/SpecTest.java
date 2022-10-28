@@ -100,10 +100,12 @@ abstract class SpecTest {
                 // A null frame means the connection was closed. Which is a good thing in this case.
                 return;
             } if (frame instanceof RstStreamFrame rstFrame) {
-                assertTrue(acceptable.contains(rstFrame.getErrorCode()));
+                assertTrue(acceptable.contains(rstFrame.getErrorCode()),
+                        "Error code was " + rstFrame.getErrorCode());
                 return;
             } else if (frame instanceof GoAwayFrame goAwayFrame) {
-                assertTrue(acceptable.contains(goAwayFrame.getErrorCode()));
+                assertTrue(acceptable.contains(goAwayFrame.getErrorCode()),
+                        "Error code was " + goAwayFrame.getErrorCode());
                 return;
             }
         }
@@ -129,5 +131,9 @@ abstract class SpecTest {
             }
         }
         fail("Stream was not closed");
+    }
+
+    protected void verifyConnectionClosed() throws IOException {
+        assertTrue(client.connectionClosed(), "Connection was not closed");
     }
 }
