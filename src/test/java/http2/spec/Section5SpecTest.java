@@ -2,7 +2,6 @@ package http2.spec;
 
 import com.hedera.hashgraph.web.impl.http2.Http2ErrorCode;
 import com.hedera.hashgraph.web.impl.http2.frames.GoAwayFrame;
-import com.hedera.hashgraph.web.impl.http2.frames.HeadersFrame;
 import com.hedera.hashgraph.web.impl.http2.frames.Settings;
 import org.junit.jupiter.api.*;
 
@@ -17,7 +16,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  */
 @DisplayName("Section 5 :: Streams and Multiplexing")
 @Tag("5")
-class StreamsSpecTest extends SpecTest {
+class Section5SpecTest extends SpecTest {
 
     @Nested
     @DisplayName("Section 5.1 :: Stream States")

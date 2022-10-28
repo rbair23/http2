@@ -7,7 +7,7 @@ import java.io.IOException;
 
 @DisplayName("Section 4 :: HTTP Frames")
 @Tag("4")
-public class FramesSpecTest {
+public class Section4SpecTest {
 
     @Nested
     @DisplayName("Section 4.1 :: Frame Format")
