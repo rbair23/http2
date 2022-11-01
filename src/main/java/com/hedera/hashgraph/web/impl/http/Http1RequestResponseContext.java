@@ -207,37 +207,12 @@ class Http1RequestResponseContext extends RequestContext implements WebRequest, 
         if (respondHasBeenCalled) {
             throw new IllegalStateException("You can call respond() after respond() has already been called.");
         }
-        respondHasBeenCalled = true;
-        responseHeaders.setContentType(contentType);
-        responseHeaders.setContentLength(bodyAsBytes.length);
-        if (responseStatusCode == null) responseStatusCode = StatusCode.OK_200;
-        // send response
-        OutputBuffer outputBuffer = checkoutOutputBuffer.get();
-        writeResponseStatusLineAndHeaders(outputBuffer);
-        // write as much of the body bytes into buffer as will fit, then send and get new buffer if needed
-        int bytesToBeSent = bodyAsBytes.length;
-        while (bytesToBeSent > 0) {
-            final int bytesThatCanBeSent = Math.min(outputBuffer.remaining(), bytesToBeSent);
-            final int startOffset = bodyAsBytes.length - bytesThatCanBeSent;
-            outputBuffer.write(bodyAsBytes,startOffset,bytesThatCanBeSent);
-            bytesToBeSent -= bytesThatCanBeSent;
-            // check if buffer is full
-            if (outputBuffer.remaining() == 0) {
-                sendResponse.accept(outputBuffer);
-                outputBuffer = checkoutOutputBuffer.get();
-            }
+        try(final OutputStream out = respond(contentType, bodyAsBytes.length)) {
+            out.write(bodyAsBytes);
+        } catch (IOException e) {
+            e.printStackTrace();
+            throw new RuntimeException(e);
         }
-        // check if we have enough room in buffer for CRLF
-        if (outputBuffer.remaining() < 2) {
-            sendResponse.accept(outputBuffer);
-            outputBuffer = checkoutOutputBuffer.get();
-        }
-        // add CRLF and send
-        outputBuffer.write(CR);
-        outputBuffer.write(LF);
-        sendResponse.accept(outputBuffer);
-        // mark as response sent
-        sendingComplete.run();
     }
 
     @Override
@@ -260,18 +235,36 @@ class Http1RequestResponseContext extends RequestContext implements WebRequest, 
             throw new IllegalStateException("You can call respond() after respond() has already been called.");
         }
         respondHasBeenCalled = true;
-        responseHeaders.setContentType(contentType);
-        responseHeaders.setContentLength(contentLength);
+        System.out.println("Http1RequestResponseContext.respond thread="+Thread.currentThread().getName());
         if (responseStatusCode == null) responseStatusCode = StatusCode.OK_200;
-        sendResponseStatusLineAndHeaders();
+        System.out.println("responseStatusCode = " + responseStatusCode);
+//        sendResponseStatusLineAndHeaders();
         // create low level sending stream
         OutputStream outputStream = new OutputBufferOutputStream(
-                checkoutOutputBuffer, sendResponse, this::responseOutputStreamClosed);
+                checkoutOutputBuffer, sendResponse,
+                outputBufferOutputStream -> {
+                    // write closing CRLF
+                    try {
+                        outputBufferOutputStream.write(new byte[]{CR,LF});
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                },
+                sendingComplete);
+        // write headers
+//        System.out.println("responseStatusCode = " + responseStatusCode);
+        responseHeaders.setContentType(contentType);
+        responseHeaders.setContentLength(contentLength);
+
+        writeResponseStatusLineAndHeaders(outputStream);
+        System.out.println("responseHeaders = " + responseHeaders);
         // check for gzip
         final String contentEncoding = responseHeaders.getContentEncoding();
-        if (contentEncoding != null && contentEncoding.contains(WebHeaders.CONTENT_ENCODING_GZIP)) {
-            outputStream = new GZIPOutputStream(outputStream);
-        }
+        System.out.println("contentEncoding = " + contentEncoding);
+
+//        if (contentEncoding != null && contentEncoding.contains(WebHeaders.CONTENT_ENCODING_GZIP)) {
+//            outputStream = new GZIPOutputStream(outputStream);
+//        }
         return outputStream;
     }
 
@@ -318,15 +311,36 @@ class Http1RequestResponseContext extends RequestContext implements WebRequest, 
     }
 
     /**
-     * Called when the response output stream is closed, after the body has been sent
+     * Called to write the initial HTTP status line and headers into a output buffer
      */
-    private void responseOutputStreamClosed() {
-        // send closing CRLF
-        final OutputBuffer outputBuffer = checkoutOutputBuffer.get();
-        outputBuffer.write(new byte[]{CR,LF});
-        sendResponse.accept(outputBuffer);
-        // mark as response sent
-        sendingComplete.run();
+    private void writeResponseStatusLineAndHeaders(OutputStream outputStream) throws IOException {
+        final StatusCode statusCode =
+                this.responseStatusCode == null ? StatusCode.INTERNAL_SERVER_ERROR_500 : this.responseStatusCode;
+        // Add standard response headers
+        responseHeaders.setStandardResponseHeaders();
+        // SEND DATA
+        StringBuilder sb = new StringBuilder();
+        // send response line
+        sb.append(version.versionString());
+        sb.append(SPACE);
+        sb.append(Integer.toString(statusCode.code()));
+        sb.append(SPACE);
+        sb.append(statusCode.message());
+        sb.append(CR);
+        sb.append(LF);
+        // send headers
+        responseHeaders.forEach((key, value) -> {
+            sb.append(key);
+            sb.append(COLON);
+            sb.append(SPACE);
+            sb.append(value);
+            sb.append(CR);
+            sb.append(LF);
+        });
+        sb.append(CR);
+        sb.append(LF);
+
+        outputStream.write(sb.toString().getBytes(StandardCharsets.US_ASCII));
     }
 
     @Override

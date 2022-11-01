@@ -85,7 +85,7 @@ public class Http1ConnectionContext extends ConnectionContext {
         this.dispatcher = Objects.requireNonNull(dispatcher);
         Objects.requireNonNull(config);
         this.requestResponseContext = new Http1RequestResponseContext(dispatcher, contextReuseManager::checkoutOutputBuffer,
-                this::sendOutput, this::responseSent);
+                this::sendOutput, this::responseCompletelySent);
     }
 
     @Override
@@ -113,7 +113,7 @@ public class Http1ConnectionContext extends ConnectionContext {
         // loop while there is still data to process, we can go through multiple states
 
         while (inputBuffer.available(1)) {
-//                System.out.println("state = " + state);
+                System.out.println("state = " + state);
             switch (state) {
                 case BEGIN:
                     inputBuffer.mark();
@@ -296,8 +296,24 @@ public class Http1ConnectionContext extends ConnectionContext {
                     }
                     break;
                 case WAITING_FOR_RESPONSE_TO_BE_SENT :
+                    System.out.println("WAITING_FOR_RESPONSE_TO_BE_SENT");
                     // we are not reading any data in this state that might be coming in for next http 1.1 request
                     break;
+            }
+        }
+    }
+
+    @Override
+    public void handleOutgoingData() {
+        super.handleOutgoingData();
+        if (state == State.WAITING_FOR_RESPONSE_TO_BE_SENT && isOutgoingDataAllSent()) {
+            System.out.println("Http1ConnectionContext.handleOutgoingData state="+state+" isKeepAlive="+isKeepAlive+" isOutgoingDataAllSent="+isOutgoingDataAllSent());
+            if (isKeepAlive) {
+                state = State.BEGIN;
+                tempHeaderKey = null;
+                requestResponseContext.reset();
+            } else {
+                terminate();
             }
         }
     }
@@ -324,11 +340,13 @@ public class Http1ConnectionContext extends ConnectionContext {
     /**
      * Handle the end of response being sent
      */
-    private void responseSent() {
+    private void responseCompletelySent() {
+        System.out.println("Http1ConnectionContext.responseSent isKeepAlive="+isKeepAlive);
         if (isKeepAlive) {
-            state = State.BEGIN;
-            tempHeaderKey = null;
-            requestResponseContext.reset();
+            state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
+//            state = State.BEGIN;
+//            tempHeaderKey = null;
+//            requestResponseContext.reset();
         } else {
             close();
         }

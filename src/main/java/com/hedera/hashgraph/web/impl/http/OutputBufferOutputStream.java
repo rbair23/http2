@@ -14,7 +14,8 @@ import java.util.function.Supplier;
 class OutputBufferOutputStream extends OutputStream {
     private final Supplier<OutputBuffer> checkoutOutputBuffer;
     private final Consumer<OutputBuffer> sendResponse;
-    private final Runnable onCLoseCallback;
+    private final Consumer<OutputBufferOutputStream> onPreCloseCallback;
+    private final Runnable onCloseCallback;
 
     private OutputBuffer currentBuffer;
     private boolean isClosed = false;
@@ -25,14 +26,17 @@ class OutputBufferOutputStream extends OutputStream {
      * @param checkoutOutputBuffer supplier of output buffers we can use
      * @param sendResponse consumer for taking filled output buffers and sending them. The buffers are not pre-flipped
      *                     before calling.
-     * @param onCLoseCallback call back for when closed is called, after last buffer has been sent
+     * @param onPreCloseCallback call back for when closed is called before we close, can send extra data
+     * @param onCloseCallback call back for when closed is called, after last buffer has been sent
      */
     public OutputBufferOutputStream(Supplier<OutputBuffer> checkoutOutputBuffer,
                                     Consumer<OutputBuffer> sendResponse,
-                                    Runnable onCLoseCallback) {
+                                    Consumer<OutputBufferOutputStream> onPreCloseCallback,
+                                    Runnable onCloseCallback) {
         this.checkoutOutputBuffer = Objects.requireNonNull(checkoutOutputBuffer);
         this.sendResponse = Objects.requireNonNull(sendResponse);
-        this.onCLoseCallback = Objects.requireNonNull(onCLoseCallback);
+        this.onPreCloseCallback = Objects.requireNonNull(onPreCloseCallback);
+        this.onCloseCallback = Objects.requireNonNull(onCloseCallback);
     }
 
     /**
@@ -68,11 +72,15 @@ class OutputBufferOutputStream extends OutputStream {
 
     @Override
     public void close() throws IOException {
-
         if (!isClosed) {
+            // call back pre-close call back, so it can write any extra data
+            onPreCloseCallback.accept(this);
+            // send final data buffer
             sendResponse.accept(currentBuffer);
-            onCLoseCallback.run();
+            // mark us as closed
+            isClosed = true;
+            // call we are closed call back
+            onCloseCallback.run();
         }
-        isClosed = true;
     }
 }

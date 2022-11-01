@@ -38,15 +38,17 @@ class SimpleTestsWithOkHttpClientTest {
     void testSimpleGet() throws Exception {
         // create server
         final String responseString = "Hello You";
-        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
+        WebServer server = new WebServer("localhost", 54321);
         server.getRoutes().get("/hello", (request, response) ->
                 response.respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT, responseString));
         server.start();
         // test url
         try (Response response = sendRequest(server,"/hello")) {
             assertEquals(200, response.code());
-            final String responseBody = response.body().string();
-            assertEquals(responseString, responseBody);
+            try(final ResponseBody responseBody = response.body()) {
+                final String responseBodyStr = responseBody.string();
+                assertEquals(responseString, responseBodyStr);
+            }
         }
         // stop server
         server.stop(Duration.ofSeconds(1));
@@ -56,7 +58,7 @@ class SimpleTestsWithOkHttpClientTest {
     void testHttp11TwoGets() throws Exception {
         // create server
         final String responseString = "Hello You";
-        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
+        WebServer server = new WebServer("localhost", 54321);
         server.getRoutes().get("/hello", (request, response) ->
                 response.respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT, responseString));
         server.start();
@@ -83,7 +85,7 @@ class SimpleTestsWithOkHttpClientTest {
             \r\n with special chars \t \u1827
             """})
     void testEcho(String testString) throws Exception {
-        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
+        WebServer server = new WebServer("localhost", 54321);
         server.getRoutes().post("/echo", (request, response) -> {
             final int contentSize = request.getRequestHeaders().getContentLength();
             System.out.println("contentSize = " + contentSize);

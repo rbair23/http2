@@ -18,6 +18,7 @@ public class WebHeadersImpl implements WebHeaders {
     private final Map<String, String> headers = new HashMap<>();
 
     public final WebHeaders put(String key, String value) {
+        System.out.println("WebHeadersImpl.put(key="+key+", value="+value+", size="+headers.size()+")");
         headers.put(key.toLowerCase(), value);
         return this;
     }

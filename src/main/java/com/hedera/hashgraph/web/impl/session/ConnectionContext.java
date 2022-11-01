@@ -108,9 +108,10 @@ public abstract class ConnectionContext implements AutoCloseable {
     /**
      * Write as much pending data to the channel as the channel will accept.
      */
-    public final void handleOutgoingData() {
+    public void handleOutgoingData() {
         try {
             while (!waitingForWriteOutputBufferQueue.isEmpty()) {
+                System.out.println("ConnectionContext.handleOutgoingData waitingForWriteOutputBufferQueue.size="+waitingForWriteOutputBufferQueue.size());
                 final OutputBuffer outputBuffer = waitingForWriteOutputBufferQueue.peek();
                 final ByteBuffer buffer = outputBuffer.getBuffer();
                 // flip the buffer, so it is ready to be written out
@@ -144,6 +145,7 @@ public abstract class ConnectionContext implements AutoCloseable {
      * @param buffer The un-flipped buffer to write
      */
     public final void sendOutput(OutputBuffer buffer) {
+        System.out.println("ConnectionContext.sendOutput isClosed="+isClosed()+" data="+new String(buffer.getBuffer().array(),0,buffer.getBuffer().position()).replace("\r\n","[CRLF]\n"));
         if (!isClosed()) {
             waitingForWriteOutputBufferQueue.add(buffer);
         }
@@ -228,6 +230,13 @@ public abstract class ConnectionContext implements AutoCloseable {
                 this.onClose.accept(false, this);
             }
         }
+    }
+
+    /**
+     * True if all queued outgoing data has been sent
+     */
+    protected boolean isOutgoingDataAllSent() {
+        return waitingForWriteOutputBufferQueue.isEmpty();
     }
 
     /**

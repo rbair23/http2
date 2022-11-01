@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class SimpleTestsWithJavaClientTest {
     @Test
     void test404() throws Exception {
-        WebServer server = new WebServer("localhost", 12345);
+        WebServer server = new WebServer("localhost", 54321);
         server.start();
         // test url
         final HttpClient httpClient = HttpClient.newBuilder()
@@ -40,7 +40,7 @@ class SimpleTestsWithJavaClientTest {
     void testSimpleGet() throws Exception {
         // create server
         final String responseString = "Hello You";
-        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
+        WebServer server = new WebServer("localhost", 54321);
         server.getRoutes().get("/hello", (request, response) ->
                 response.respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT, responseString));
         server.start();
@@ -64,7 +64,7 @@ class SimpleTestsWithJavaClientTest {
     void testHttp11TwoGets() throws Exception {
         // create server
         final String responseString = "Hello You";
-        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
+        WebServer server = new WebServer("localhost", 54321);
         server.getRoutes().get("/hello", (request, response) ->
                 response.respond(WebResponse.CONTENT_TYPE_PLAIN_TEXT, responseString));
         server.start();
@@ -104,7 +104,7 @@ class SimpleTestsWithJavaClientTest {
             \r\n with special chars \t \u1827
             """})
     void testEcho(String testString) throws Exception {
-        WebServer server = new WebServer("localhost", WebServer.EPHEMERAL_PORT);
+        WebServer server = new WebServer("localhost", 54321);
         server.getRoutes().post("/echo", (request, response) -> {
             final int contentSize = request.getRequestHeaders().getContentLength();
             System.out.println("contentSize = " + contentSize);
