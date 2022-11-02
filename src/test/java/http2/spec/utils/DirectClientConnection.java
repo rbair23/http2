@@ -330,7 +330,7 @@ public class DirectClientConnection implements ClientConnection {
             final var contextReuseManager = new ContextReuseManager(dispatcher, config);
             http2Connection = new Http2ConnectionImpl(contextReuseManager, config);
             serverChannel = new MockByteChannel();
-            http2Connection.reset(serverChannel, null);
+            http2Connection.reset(serverChannel);
         }
 
         public void send() throws IOException {

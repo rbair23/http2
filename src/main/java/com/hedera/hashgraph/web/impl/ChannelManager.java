@@ -13,7 +13,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -60,13 +59,6 @@ public final class ChannelManager implements Runnable, AutoCloseable {
     private final WebServerConfig config;
 
     /**
-     * The number of additional connections that can be made. There is a configurable upper limit.
-     * As a new connection is made, this number is decremented. As the connection is closed,
-     * the number is incremented.
-     */
-    private final AtomicInteger availableConnections;
-
-    /**
      * This is a utility class used for reusing the different {@link ConnectionContext} types and subtypes.
      */
     private final ContextReuseManager contextReuseManager;
@@ -101,7 +93,6 @@ public final class ChannelManager implements Runnable, AutoCloseable {
             final ServerSocketChannel serverSocketChannel) throws IOException {
         this.config = Objects.requireNonNull(config);
         Objects.requireNonNull(dispatcher); // used by subclasses
-        this.availableConnections = new AtomicInteger(config.maxIdleConnections());
         this.contextReuseManager = new ContextReuseManager(dispatcher, config);
         this.serverSocketChannel = Objects.requireNonNull(serverSocketChannel);
 
@@ -178,7 +169,7 @@ public final class ChannelManager implements Runnable, AutoCloseable {
                 try {
                     if (!key.isValid()) {
                         System.out.println("NON VALID KEY FOUND");
-                    } else if (key == acceptKey && availableConnections.get() > 0) { // handle accept
+                    } else if (key == acceptKey && connectionContexts.size() < config.maxIdleConnections()) { // handle accept
                         System.out.println("Accept new connection");
                         accept();
                     } else { // handle read/write
@@ -192,9 +183,8 @@ public final class ChannelManager implements Runnable, AutoCloseable {
                         if (connectionContext == null) {
                             // Always start with HTTP/1.1
                             connectionContext = contextReuseManager.checkoutHttp1ConnectionContext();
-                            connectionContext.reset(channel, this::handleOnClose);
+                            connectionContext.reset(channel);
                             key.attach(connectionContext);
-                            availableConnections.decrementAndGet();
                             connectionContexts.add(connectionContext);
                         }
                         // check if channel is closed
@@ -226,18 +216,18 @@ public final class ChannelManager implements Runnable, AutoCloseable {
                 connectionContextsCursor = 0;
             }
             final ConnectionContext cc = connectionContexts.get(connectionContextsCursor);
-            if (cc.isTerminated() || !cc.checkClientIsWellBehaving()) {
+            if (cc.isTerminated() || !cc.isStillValidConnection()) {
+                // we now no the connection is truly done with, and we can clean up its resources
+                if (!cc.isTerminated()) {
+                    cc.terminate();
+                }
+                // remove from list
                 connectionContexts.remove(connectionContextsCursor);
                 // we just changed index
                 connectionContextsCursor = Math.min(0, connectionContextsCursor -1);
+                // only now when we are completely finished with teh channel context can we allow it to be reused
+                cc.canBeReused();
             }
-        }
-    }
-
-    private void handleOnClose(boolean isFullyClosed, ConnectionContext closedConnectionContext) {
-        connectionContexts.remove(closedConnectionContext);
-        if (isFullyClosed) {
-            availableConnections.incrementAndGet();
         }
     }
 
@@ -251,7 +241,7 @@ public final class ChannelManager implements Runnable, AutoCloseable {
         if (version == HttpVersion.HTTP_2) {
             Http1ConnectionContext currentConnectionContext = (Http1ConnectionContext) key.attachment();
             Http2ConnectionImpl http2ChannelSession = contextReuseManager.checkoutHttp2ConnectionContext();
-            http2ChannelSession.reset((SocketChannel) key.channel(), this::handleOnClose);
+            http2ChannelSession.reset((SocketChannel) key.channel());
             key.attach(http2ChannelSession);
             http2ChannelSession.upgrade(currentConnectionContext);
             // continue handling with HTTP2

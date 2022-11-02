@@ -13,6 +13,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @SuppressWarnings({"SameParameterValue", "ConstantConditions"})
@@ -25,13 +26,15 @@ class SimpleTestsWithJavaClientTest {
         final HttpClient httpClient = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .build();
-        final HttpResponse<String> response = httpClient.send(
-                HttpRequest.newBuilder()
-                        .uri(new URI("http:/" + server.getBoundAddress() + "/BAD_PATH"))
-                        .GET()
-                        .build(),
-                HttpResponse.BodyHandlers.ofString());
-        assertEquals(404, response.statusCode());
+        assertDoesNotThrow(() -> {
+            final HttpResponse<String> response = httpClient.send(
+                    HttpRequest.newBuilder()
+                            .uri(new URI("http:/" + server.getBoundAddress() + "/BAD_PATH"))
+                            .GET()
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(404, response.statusCode());
+        });
         // stop server
         server.stop(Duration.ofSeconds(1));
     }

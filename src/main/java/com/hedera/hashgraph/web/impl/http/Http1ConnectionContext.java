@@ -13,7 +13,10 @@ import java.net.URISyntaxException;
 import java.nio.channels.ByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
-import java.util.function.BiConsumer;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
 import static com.hedera.hashgraph.web.impl.http.Http1Constants.*;
@@ -72,6 +75,14 @@ public class Http1ConnectionContext extends ConnectionContext {
     private boolean isKeepAlive = false;
 
     /**
+     * This future represents the currently submitted job to the {@link Dispatcher}. When the stream
+     * is closed || terminated, then this job will be canceled if it has not been completed.
+     * Canceling the job will only cause the associated thread to be interrupted, it is up to the
+     * application to respect the {@link InterruptedException} and stop working.
+     */
+    private Future<?> submittedJob;
+
+    /**
      * Create a new instance.
      *
      * @param contextReuseManager The {@link ContextReuseManager} that manages this instance. Must not be null.
@@ -89,18 +100,13 @@ public class Http1ConnectionContext extends ConnectionContext {
     }
 
     @Override
-    public void reset(ByteChannel channel, final BiConsumer<Boolean, ConnectionContext> onCloseCallback) {
-        super.reset(channel, onCloseCallback);
+    public void reset(ByteChannel channel) {
+        super.reset(channel);
         state = State.BEGIN;
         tempHeaderKey = null;
         isKeepAlive = false;
         requestResponseContext.reset();
-    }
-
-    @Override
-    public void close() {
-        super.close();
-        contextReuseManager.returnHttp1ConnectionContext(this);
+        submittedJob = null;
     }
 
     @Override
@@ -250,7 +256,7 @@ public class Http1ConnectionContext extends ConnectionContext {
                                 // dispatch
                                 System.out.println(" dispatching");
                                 state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
-                                dispatcher.dispatch(requestResponseContext, requestResponseContext);
+                                submittedJob = dispatcher.dispatch(requestResponseContext, requestResponseContext);
                                 System.out.println(" dispatching done");
                                 // we have done our job reading data, now up to dispatcher to send response and the
                                 // call callback.
@@ -292,12 +298,30 @@ public class Http1ConnectionContext extends ConnectionContext {
                         requestResponseContext.setRequestBody(new BodyInputStream(inputBuffer,bodySize));
                         // dispatch
                         state = State.WAITING_FOR_RESPONSE_TO_BE_SENT;
-                        dispatcher.dispatch(requestResponseContext, requestResponseContext);
+                        submittedJob = dispatcher.dispatch(requestResponseContext, requestResponseContext);
                     }
                     break;
                 case WAITING_FOR_RESPONSE_TO_BE_SENT :
                     System.out.println("WAITING_FOR_RESPONSE_TO_BE_SENT");
                     // we are not reading any data in this state that might be coming in for next http 1.1 request
+                    if (submittedJob.isDone()) {
+                        // check if dispatch throw an exception
+                        try {
+                            submittedJob.get(1, TimeUnit.MILLISECONDS);
+                        } catch (ExecutionException e) {
+                            if (!requestResponseContext.responseHasBeenSent()) {
+                                requestResponseContext.respond(StatusCode.INTERNAL_SERVER_ERROR_500);
+                                close();
+                            }
+                            e.printStackTrace();
+                        } catch (InterruptedException ignore) {
+                            // this is allowed to happen
+                            ignore.printStackTrace();
+                        } catch (TimeoutException e) {
+                            // should never happen
+                            throw new RuntimeException(e);
+                        }
+                    }
                     break;
             }
         }
@@ -306,17 +330,20 @@ public class Http1ConnectionContext extends ConnectionContext {
     @Override
     public void handleOutgoingData() {
         super.handleOutgoingData();
+//        System.out.println("Http1ConnectionContext.handleOutgoingData state="+state+" isKeepAlive="+isKeepAlive+" isOutgoingDataAllSent="+isOutgoingDataAllSent());
         if (state == State.WAITING_FOR_RESPONSE_TO_BE_SENT && isOutgoingDataAllSent()) {
-            System.out.println("Http1ConnectionContext.handleOutgoingData state="+state+" isKeepAlive="+isKeepAlive+" isOutgoingDataAllSent="+isOutgoingDataAllSent());
             if (isKeepAlive) {
                 state = State.BEGIN;
                 tempHeaderKey = null;
                 requestResponseContext.reset();
-            } else {
+            } else if (isClosed()) {
+                // we are done sending data and the connection is closed so no new data can be added to outgoing queue,
+                // so we can terminate this connection context.
                 terminate();
             }
         }
     }
+
 
     /**
      * Helper method to send a simple status code error response.
@@ -328,10 +355,26 @@ public class Http1ConnectionContext extends ConnectionContext {
         close();
     }
 
+    /**
+     * Terminate this connection context
+     */
     @Override
-    protected void terminate() {
+    public void terminate() {
         super.terminate();
-        contextReuseManager.returnHttp1ConnectionContext(this);
+        // Try to interrupt the handler thread, if there is one.
+        if (submittedJob != null) {
+            submittedJob.cancel(true);
+        }
+        this.submittedJob = null;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void canBeReused() {
+        // This connection has been fully terminated, so it can now be reused
+        this.contextReuseManager.returnHttp1ConnectionContext(this);
     }
 
 // =================================================================================================================

@@ -2,8 +2,6 @@ package com.hedera.hashgraph.web.impl.session;
 
 import com.hedera.hashgraph.web.HttpVersion;
 import com.hedera.hashgraph.web.impl.ChannelManager;
-import com.hedera.hashgraph.web.impl.http2.frames.FrameType;
-import com.hedera.hashgraph.web.impl.http2.frames.Settings;
 import com.hedera.hashgraph.web.impl.util.InputBuffer;
 import com.hedera.hashgraph.web.impl.util.OutputBuffer;
 
@@ -12,8 +10,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ByteChannel;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -63,14 +59,8 @@ public abstract class ConnectionContext implements AutoCloseable {
     private ByteChannel channel;
 
     /**
-     * A callback invoked when the context is closed. It is passed a boolean, true indicating context is fully closed or
-     * false indicating the context is currently closing but not all pending data has been sent yet.
-     */
-    private BiConsumer<Boolean, ConnectionContext> onClose;
-
-    /**
      * Keeps track of whether the instance is closed. Set to true in {@link #close()} and set to
-     * false in {@link #reset(ByteChannel, BiConsumer)}.
+     * false in {@link #reset(ByteChannel)}.
      */
     private boolean closed = true;
 
@@ -99,7 +89,7 @@ public abstract class ConnectionContext implements AutoCloseable {
             doHandle(onConnectionUpgrade);
         } catch (Exception e) {
             // The underlying channel is closed, we need to clean things up
-//            e.printStackTrace(); // LOGGING: Need to log this, maybe as trace or debug
+            e.printStackTrace(); // LOGGING: Need to log this, maybe as trace or debug
             // TODO should we be sending a 500 response?
             terminate();
         }
@@ -157,7 +147,7 @@ public abstract class ConnectionContext implements AutoCloseable {
      *
      * @return true if everything is good or false if the connection has been terminated.
      */
-    public boolean checkClientIsWellBehaving() {
+    public boolean isStillValidConnection() {
         return true; // TODO implement common logic here and sub classes can add their own
     }
 
@@ -175,15 +165,12 @@ public abstract class ConnectionContext implements AutoCloseable {
      * Transitions this {@link ConnectionContext} to be open.
      *
      * <p>edu.umd.cs.findbugs.annotations.OverrideMustInvoke
+     *
      * @param channel The new channel to hold data for.
-     * @param onCloseCallback   callback invoked when the context is closed. It is passed a boolean, true indicating
-     *                          context is fully closed or false indicating the context is currently closing but not
-     *                          all pending data has been sent yet.
      */
-    public synchronized void reset(ByteChannel channel, BiConsumer<Boolean, ConnectionContext> onCloseCallback) {
+    public synchronized void reset(ByteChannel channel) {
         closed = false;
         this.channel = Objects.requireNonNull(channel);
-        this.onClose = onCloseCallback;
         this.inputBuffer.reset();
         this.waitingForWriteOutputBufferQueue.clear();
     }
@@ -225,10 +212,6 @@ public abstract class ConnectionContext implements AutoCloseable {
                 // the channel is already closed so just close immediately as we can not finish sending data
                 terminate();
             }
-            // notify callback that we are starting closing
-            if (this.onClose != null) {
-                this.onClose.accept(false, this);
-            }
         }
     }
 
@@ -252,8 +235,11 @@ public abstract class ConnectionContext implements AutoCloseable {
     /**
      * Terminate closes the channel and ends all communication without sending any buffered data or doing any more work
      */
-    protected void terminate() {
+    public void terminate() {
         System.out.println("ConnectionContext.terminate");
+        // if we are terminating we are also closed
+        closed = true;
+        // close the channel if it is not already closed
         if (channel != null && channel.isOpen()) {
             try {
                 this.channel.close();
@@ -262,12 +248,15 @@ public abstract class ConnectionContext implements AutoCloseable {
                 ignored.printStackTrace();
             }
         }
+        // release resources that are no longer needed
         this.channel = null;
         this.inputBuffer.reset();
         this.waitingForWriteOutputBufferQueue.clear();
-        // notify callback that we are fully closed
-        if (this.onClose != null) {
-            this.onClose.accept(true, this);
-        }
     }
+
+    /**
+     * Called when {@link ChannelManager} is finished with using this connection context, and it is available for reuse
+     */
+    public abstract void canBeReused();
+
 }

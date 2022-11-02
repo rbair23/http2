@@ -19,7 +19,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -233,9 +232,9 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
      * {@inheritDoc}
      */
     @Override
-    public synchronized void reset(final ByteChannel channel, final BiConsumer<Boolean, ConnectionContext> onCloseCallback) {
+    public synchronized void reset(final ByteChannel channel) {
         // NOTE: Called on the connection thread
-        super.reset(channel, onCloseCallback);
+        super.reset(channel);
         this.state = State.START;
         this.clientSettings.resetToDefaults();
         // TODO Hmmmm.
@@ -275,8 +274,16 @@ public final class Http2ConnectionImpl extends ConnectionContext implements Http
             this.streams.forEach((k, v) -> v.terminate());
             this.streams.clear();
             super.close();
-            this.contextReuseManager.returnHttp2ConnectionContext(this);
         }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void canBeReused() {
+        // This connection has been fully terminated, so it can now be reused
+        this.contextReuseManager.returnHttp2ConnectionContext(this);
     }
 
     /**
