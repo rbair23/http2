@@ -6,6 +6,8 @@ class Http1Constants {
     static final int MAX_VERSION_LENGTH = 8;
     static final int MAX_HEADER_KEY_LENGTH = 1024;
     static final int MAX_HEADER_VALUE_LENGTH = 1024;
+    static final int MAX_CHUNK_SIZE_LENGTH = 1024;
+    static final int MAX_CHUNK_FOOTERS_LENGTH = 1024;
 
     static final char CR = '\r';
     static final char LF = '\n';

@@ -41,15 +41,16 @@ public class Http1ConnectionContext extends ConnectionContext {
     /** States for parser state machine */
     private enum State {
         BEGIN,
-        METHOD,
-        URI,
+        REQUEST_LINE_METHOD,
+        REQUEST_LINE_REQUEST_TARGET_URI,
         VERSION,
         HTTP2_PREFACE,
         HEADER_KEY,
         HEADER_VALUE,
         WAITING_FOR_END_OF_REQUEST_BODY,
         WAITING_FOR_RESPONSE_TO_BE_SENT,
-        HTTP2_UPGRADE
+        HTTP2_UPGRADE,
+        CLOSED
     };
 
     /** Parsing state machine current state */
@@ -111,21 +112,29 @@ public class Http1ConnectionContext extends ConnectionContext {
 
     @Override
     protected void doHandle(Consumer<HttpVersion> onConnectionUpgrade) {
-        //         generic-message = start-line
-        //                          *(message-header CRLF)
-        //                          CRLF
-        //                          [ message-body ]
-        //        start-line      = Request-Line | Status-Line
-        // loop while there is still data to process, we can go through multiple states
+        try {
+            System.out.println(new URI("https://httpwg.org/specs/rfc9110.html#OPTIONS?hello=there").getPath());
+        } catch (URISyntaxException e) {
+            throw new RuntimeException(e);
+        }
+        // Parse HTTP 1.1 Request Message based on https://httpwg.org/specs/rfc9112.html#message.body
+        //
+        // HTTP-message   = start-line CRLF
+        //                  *( field-line CRLF )
+        //                  CRLF
+        //                  [ message-body ]
+        // start-line     = request-line / status-line
 
+        // loop while there is still data to process, we can go through multiple states, if we run out of data to
+        // complete a state we return and wait till more data arrives from client
         while (inputBuffer.available(1)) {
                 System.out.println("state = " + state);
             switch (state) {
                 case BEGIN:
                     inputBuffer.mark();
-                    state = State.METHOD;
+                    state = State.REQUEST_LINE_METHOD;
                     break;
-                case METHOD:
+                case REQUEST_LINE_METHOD:
                     if (searchForSpace(MAX_METHOD_LENGTH)) {
                         // we found a space, so read between mark and current position as string
                         final int bytesRead = inputBuffer.resetToMark();
@@ -134,17 +143,21 @@ public class Http1ConnectionContext extends ConnectionContext {
                         inputBuffer.skip(1);
                         // next state
                         inputBuffer.mark();
-                        state = State.URI;
+                        state = State.REQUEST_LINE_REQUEST_TARGET_URI;
                     }
                     break;
-                case URI:
+                case REQUEST_LINE_REQUEST_TARGET_URI:
                     if (searchForSpace(MAX_URI_LENGTH)) {
                         try {
                             // we found a space, so read between mark and current position as string
                             final int bytesRead = inputBuffer.resetToMark();
                             final String uriString = inputBuffer.readString(bytesRead, StandardCharsets.US_ASCII);
+                            // We support all URI's supported by Java which is slightly more lenient that the HTTP Spec.
+                            // They path component is extracted and passed
                             final URI uri = new URI(uriString);
                             requestResponseContext.setPath(uri.getPath());
+                            // TODO https://httpwg.org/specs/rfc9112.html#rfc.section.3.2 specifies we should check
+                            //      authority part of URI against
                             // skip over the space
                             inputBuffer.skip(1);
                             // next state
@@ -349,6 +362,7 @@ public class Http1ConnectionContext extends ConnectionContext {
      * Helper method to send a simple status code error response.
      */
     private void closeWithError(StatusCode statusCode) {
+        state = State.CLOSED;
         if (!requestResponseContext.responseHasBeenSent()) {
             requestResponseContext.respond(statusCode);
         }
@@ -406,6 +420,10 @@ public class Http1ConnectionContext extends ConnectionContext {
             }
             inputBuffer.skip(1);
         }
+        // check if we got to max length without finding a space
+        if (inputBuffer.getNumMarkedBytes() >= maxLengthToSearch) {
+            closeWithError(StatusCode.BAD_REQUEST_400);
+        }
         return false;
     }
 
@@ -430,6 +448,10 @@ public class Http1ConnectionContext extends ConnectionContext {
                 inputBuffer.skip(1);
             }
         }
+        // check if we got to max length without finding an end of line
+        if (inputBuffer.getNumMarkedBytes() >= maxLengthToSearch) {
+            closeWithError(StatusCode.BAD_REQUEST_400);
+        }
         return false;
     }
 
@@ -447,6 +469,10 @@ public class Http1ConnectionContext extends ConnectionContext {
                 return true;
             }
             inputBuffer.skip(1);
+        }
+        // check if we got to max length without finding a header separator
+        if (inputBuffer.getNumMarkedBytes() >= maxLengthToSearch) {
+            closeWithError(StatusCode.BAD_REQUEST_400);
         }
         return false;
     }

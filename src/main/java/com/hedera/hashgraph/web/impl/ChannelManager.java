@@ -33,7 +33,7 @@ public final class ChannelManager implements Runnable, AutoCloseable {
     private static final Duration DEFAULT_CHANNEL_TIMEOUT = Duration.ofMillis(500);
 
     /**
-     * The maximum number of connections we iterate over checking thier well-being on each loop
+     * The maximum number of connections we iterate over checking their well-being on each loop
      */
     private static final int MAX_CONNECTIONS_TO_CHECK_PER_LOOP = 10;
 
