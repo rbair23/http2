@@ -42,6 +42,11 @@ public class ChunkedInputStream extends InputStream {
     private State state = State.CHUNK_SIZE;
 
     @Override
+    public void close() throws IOException {
+        in.close();
+    }
+
+    @Override
     public int read() throws IOException {
         switch (state) {
             case CHUNK_SIZE -> {
@@ -180,7 +185,7 @@ public class ChunkedInputStream extends InputStream {
                 default -> {
                     if (chunkSize == 0 && charsRead == 1) {
                         // we never got a hex digit, oops
-                        throw new IOException("Zero length chunk size");
+                        throw new IOException("Zero length chunk size, last char="+c);
                     } else {
                         // got to end of chunkSizeHex
                         // it must be followed by white space, ';' or CR

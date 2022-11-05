@@ -8,6 +8,7 @@ class Http1Constants {
     static final int MAX_HEADER_VALUE_LENGTH = 1024;
     static final int MAX_CHUNK_SIZE_LENGTH = 1024;
     static final int MAX_CHUNK_FOOTERS_LENGTH = 1024;
+    static final int MAX_CHUNK_SIZE = 32*1024; // 32k, should easily be able to send a 16k message as one chunk
 
     static final char CR = '\r';
     static final char LF = '\n';
